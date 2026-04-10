@@ -39,16 +39,16 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
 
 ## Milestone 2 — Player avatar and combat primitives
 
-- [ ] **Player model** built from 3–4 boxes (torso + head + 2 limbs). For now
+- [x] **Player model** built from 3–4 boxes (torso + head + 2 limbs). For now
       hidden in first-person; appears for other players in MP.
-- [ ] **Sword** model: 2 boxes (blade + crossguard). Equipped state, swing
+- [x] **Sword** model: 2 boxes (blade + crossguard). Equipped state, swing
       animation = simple rotation.
-- [ ] **Shield** model: 1 big box + 1 small box (grip). Blocking state reduces
+- [x] **Shield** model: 1 big box + 1 small box (grip). Blocking state reduces
       damage from frontal sources, fully blocks "heavy ranged" boss attacks.
-- [ ] **Bow** model: a triangle (`ConeGeometry` segmented = 3) + a thin string
+- [x] **Bow** model: a triangle (`ConeGeometry` segmented = 3) + a thin string
       box. Charge-up + release. Spawns a small box "arrow" projectile.
-- [ ] Player HP, stamina, hitbox (capsule approximated as cylinder for now).
-- [ ] Death = full reset to spawn, drop everything, lose all gold and gear.
+- [x] Player HP, stamina, hitbox (capsule approximated as cylinder for now).
+- [x] Death = full reset to spawn, drop everything, lose all gold and gear.
 
 ## Milestone 3 — Mobs
 

@@ -1,6 +1,7 @@
 /**
- * Authoritative client-side player state. Will be mirrored server-side once
- * the multiplayer layer exists — see docs/TASKS.md (Multiplayer).
+ * Local kinematic state for the first-person controller. Combat stats (HP,
+ * stamina, gold, weapon) are authoritative on the server and mirrored via
+ * `SnapshotMsg` — see `docs/TASKS.md` Milestone 2.
  */
 export interface PlayerState {
   /** World velocity in m/s. */

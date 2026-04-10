@@ -10,6 +10,7 @@ const gameCanvas: HTMLCanvasElement = canvasEl;
 
 const hudHint = document.getElementById("hud") ?? undefined;
 const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
+const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
 const joinNickname = document.getElementById("join-nickname");
 const joinSubmit = document.getElementById("join-submit");
@@ -59,6 +60,7 @@ async function startMultiplayer(): Promise<void> {
       canvas: gameCanvas,
       hudHint,
       safeZoneHint,
+      hudCombat,
       localPlayerId: mp.id,
     });
     game.attachMultiplayer(mp);

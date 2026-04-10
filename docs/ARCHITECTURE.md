@@ -8,6 +8,8 @@ src/
   game/
     Game.ts                     Owns renderer, scene, camera, loop, resize, dispose.
                                 Wires modules together; never contains gameplay.
+    RemotePlayers.ts            Box avatars + primitive weapons for remotes.
+    WorldArrows.ts              Server-synced arrow meshes.
   scene/
     DesertScene.ts              Builds terrain mesh, lighting, mountains, rocks.
                                 Returns ONLY what gameplay needs (height function,
@@ -20,7 +22,12 @@ src/
     FirstPersonControls.ts      Input + kinematic movement; uses `circleAabbXZ`.
     circleAabbXZ.ts             Pure circle-vs-AABB XZ resolution (tested). Server
                                 mirrors the same math in `server/src/world.rs`.
+    CombatInput.ts              Local weapon/block/bow intents; outbound fields are
+                                merged into WebSocket `input` messages.
     PlayerState.ts              Plain interface — will be mirrored server-side.
+  combat/
+    constants.ts                Shared tuning (melee reach, forward-from-yaw).
+    meleeHit.ts                 Client-side mirror of melee cone checks (tested).
   utils/
     math.ts                     `clamp`, `hash2`. No business logic.
 ```
@@ -28,6 +35,9 @@ src/
 The **`server/`** crate (not under `src/`) is the production HTTP + WebSocket entry:
 it serves the Vite `dist/` assets and runs authoritative movement validation
 (`server/src/validate.rs`) against the shared terrain + collider data.
+Authoritative combat (melee, arrows, HP/stamina, death/respawn) lives in
+`server/src/combat.rs` and is driven by extra fields on the same `input`
+messages plus the 20 Hz tick loop.
 
 ### Why this split
 

@@ -1,9 +1,11 @@
 import { Clock, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import type { MultiplayerClient } from "../net/multiplayer";
 import type { SnapshotMsg } from "../net/types";
+import { CombatInput } from "../player/CombatInput";
 import { FirstPersonControls } from "../player/FirstPersonControls";
 import { buildDesertScene } from "../scene/DesertScene";
 import { RemotePlayers } from "./RemotePlayers";
+import { WorldArrows } from "./WorldArrows";
 
 /**
  * Owns the renderer, scene, camera, animation loop, resize handler, and dispose.
@@ -17,6 +19,8 @@ export interface GameOptions {
   canvas: HTMLCanvasElement;
   hudHint?: HTMLElement;
   safeZoneHint?: HTMLElement;
+  /** HP / stamina / gold (multiplayer). */
+  hudCombat?: HTMLElement;
   /** When set, other players are rendered for this connection. */
   localPlayerId?: string;
 }
@@ -28,8 +32,12 @@ export class Game {
   private readonly camera: PerspectiveCamera;
   private readonly clock = new Clock();
   private readonly controls: FirstPersonControls;
+  private readonly combatInput: CombatInput | null;
   private readonly resizeHandler: () => void;
   private readonly remotePlayers: RemotePlayers | null;
+  private readonly worldArrows: WorldArrows | null;
+  private readonly hudCombat?: HTMLElement;
+  private readonly localPlayerId?: string;
   private multiplayer: MultiplayerClient | null = null;
   private animationId: number | null = null;
   private disposed = false;
@@ -64,9 +72,17 @@ export class Game {
     });
     this.controls.setSpawn(world.spawn);
 
+    this.localPlayerId = options.localPlayerId;
+    this.hudCombat = options.hudCombat;
     this.remotePlayers =
       options.localPlayerId !== undefined
         ? new RemotePlayers(this.scene, options.localPlayerId)
+        : null;
+    this.worldArrows =
+      options.localPlayerId !== undefined ? new WorldArrows(this.scene) : null;
+    this.combatInput =
+      options.localPlayerId !== undefined
+        ? new CombatInput(this.canvas, () => this.controls.controls.isLocked)
         : null;
 
     this.resizeHandler = (): void => this.handleResize();
@@ -79,12 +95,71 @@ export class Game {
   attachMultiplayer(client: MultiplayerClient): void {
     if (this.disposed) return;
     this.multiplayer = client;
-    client.startSending(() => this.controls.getNetworkPose());
+    if (!this.combatInput) {
+      client.startSending(() => {
+        const pose = this.controls.getNetworkPose();
+        return {
+          x: pose.x,
+          y: pose.y,
+          z: pose.z,
+          yaw: pose.yaw,
+          pitch: pose.pitch,
+          weapon: "sword",
+          blocking: false,
+          bowCharge: 0,
+          swing: false,
+          fireArrow: false,
+        };
+      });
+      return;
+    }
+    const combatInput = this.combatInput;
+    client.startSending(() => {
+      const pose = this.controls.getNetworkPose();
+      const c = combatInput.consumeOutbound();
+      return {
+        x: pose.x,
+        y: pose.y,
+        z: pose.z,
+        yaw: pose.yaw,
+        pitch: pose.pitch,
+        weapon: c.weapon,
+        blocking: c.blocking,
+        bowCharge: c.bowCharge,
+        swing: c.swing,
+        fireArrow: c.fireArrow,
+      };
+    });
   }
 
   applyRemoteSnapshot(msg: SnapshotMsg): void {
-    if (this.disposed || !this.remotePlayers) return;
-    this.remotePlayers.applySnapshot(msg.players);
+    if (this.disposed) return;
+    const players = msg.players;
+    const arrows = msg.arrows ?? [];
+    this.remotePlayers?.applySnapshot(players);
+    this.worldArrows?.sync(arrows);
+    this.updateCombatHud(players);
+  }
+
+  private updateCombatHud(players: SnapshotMsg["players"]): void {
+    const el = this.hudCombat;
+    const id = this.localPlayerId;
+    if (!el || !id) return;
+    const me = players.find((p) => p.id === id);
+    if (!me) return;
+    el.classList.remove("hidden");
+    const hpEl = el.querySelector("[data-hp]");
+    const stEl = el.querySelector("[data-stamina]");
+    const gEl = el.querySelector("[data-gold]");
+    const wEl = el.querySelector("[data-weapon]");
+    if (hpEl) hpEl.textContent = String(Math.round(me.hp));
+    if (stEl) stEl.textContent = String(Math.round(me.stamina));
+    if (gEl) gEl.textContent = String(me.gold);
+    if (wEl) wEl.textContent = me.weapon;
+    const hpFill = el.querySelector("[data-hp-fill]") as HTMLElement | null;
+    const stFill = el.querySelector("[data-stamina-fill]") as HTMLElement | null;
+    if (hpFill) hpFill.style.width = `${Math.max(0, Math.min(100, me.hp))}%`;
+    if (stFill) stFill.style.width = `${Math.max(0, Math.min(100, me.stamina))}%`;
   }
 
   start(): void {
@@ -95,6 +170,7 @@ export class Game {
       // Clamp delta so a backgrounded tab can't unleash a huge step on resume.
       const delta = Math.min(this.clock.getDelta(), 0.05);
       this.controls.update(delta);
+      this.combatInput?.update(delta);
       this.renderer.render(this.scene, this.camera);
     };
     this.animationId = requestAnimationFrame(loop);
@@ -111,6 +187,8 @@ export class Game {
     this.multiplayer?.dispose();
     this.multiplayer = null;
     this.remotePlayers?.dispose();
+    this.worldArrows?.dispose();
+    this.combatInput?.dispose();
     this.controls.dispose();
     this.renderer.dispose();
   }

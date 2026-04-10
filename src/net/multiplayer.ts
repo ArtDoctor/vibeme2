@@ -20,12 +20,17 @@ export class MultiplayerClient {
   private readonly sessionKey: string;
   private readonly onSnapshot: (msg: SnapshotMsg) => void;
   private sendInterval: ReturnType<typeof setInterval> | null = null;
-  private getPose: (() => {
+  private getInputPayload: (() => {
     x: number;
     y: number;
     z: number;
     yaw: number;
     pitch: number;
+    weapon: string;
+    blocking: boolean;
+    bowCharge: number;
+    swing: boolean;
+    fireArrow: boolean;
   }) | null = null;
   private seq = 0;
 
@@ -58,6 +63,23 @@ export class MultiplayerClient {
   }
 
   static connect(
+    options: MultiplayerOptions,
+    onSnapshot: (msg: SnapshotMsg) => void,
+  ): Promise<MultiplayerClient> {
+    const hadSession = options.session !== null;
+    return MultiplayerClient.connectOnce(options, onSnapshot).catch((err) => {
+      if (isStaleSessionJoinError(err, hadSession)) {
+        clearStoredSession();
+        return MultiplayerClient.connectOnce(
+          { ...options, session: null },
+          onSnapshot,
+        );
+      }
+      throw err;
+    });
+  }
+
+  private static connectOnce(
     options: MultiplayerOptions,
     onSnapshot: (msg: SnapshotMsg) => void,
   ): Promise<MultiplayerClient> {
@@ -113,20 +135,25 @@ export class MultiplayerClient {
     return this.localPlayerId;
   }
 
-  /** Call once controls are ready; sends pose at server tick rate. */
-  startSending(getPose: () => {
+  /** Call once controls are ready; sends pose + combat at server tick rate. */
+  startSending(getInputPayload: () => {
     x: number;
     y: number;
     z: number;
     yaw: number;
     pitch: number;
+    weapon: string;
+    blocking: boolean;
+    bowCharge: number;
+    swing: boolean;
+    fireArrow: boolean;
   }): void {
-    this.getPose = getPose;
+    this.getInputPayload = getInputPayload;
     const ms = Math.max(16, Math.floor(1000 / this.tickHz));
     this.sendInterval = setInterval(() => {
-      if (this.ws.readyState !== WebSocket.OPEN || !this.getPose) return;
+      if (this.ws.readyState !== WebSocket.OPEN || !this.getInputPayload) return;
       this.seq += 1;
-      const p = this.getPose();
+      const p = this.getInputPayload();
       const payload = {
         type: "input" as const,
         seq: this.seq,
@@ -135,6 +162,11 @@ export class MultiplayerClient {
         z: p.z,
         yaw: p.yaw,
         pitch: p.pitch,
+        weapon: p.weapon,
+        blocking: p.blocking,
+        bowCharge: p.bowCharge,
+        swing: p.swing,
+        fireArrow: p.fireArrow,
       };
       this.ws.send(JSON.stringify(payload));
     }, ms);
@@ -155,4 +187,18 @@ export function readStoredSession(): string | null {
   } catch {
     return null;
   }
+}
+
+export function clearStoredSession(): void {
+  try {
+    window.localStorage.removeItem(DEFAULT_SESSION_KEY);
+  } catch {
+    /* private mode / blocked */
+  }
+}
+
+/** Server removes the session when the tab disconnects; stale tokens need a fresh join. */
+function isStaleSessionJoinError(err: unknown, hadSession: boolean): boolean {
+  if (!hadSession || !(err instanceof Error)) return false;
+  return err.message.includes("expired session");
 }

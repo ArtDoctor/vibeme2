@@ -62,6 +62,70 @@ body {
   display: none;
 }
 
+.hud-combat {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(244, 233, 200, 0.25);
+  border-radius: 6px;
+  font-size: 13px;
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-combat.hidden {
+  display: none;
+}
+
+.hud-combat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-label {
+  width: 22px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.hud-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hud-bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 3px;
+  transition: width 0.08s linear;
+}
+
+.hud-hp {
+  background: linear-gradient(90deg, #8a3030, #c05050);
+}
+
+.hud-st {
+  background: linear-gradient(90deg, #305a8a, #5090c0);
+}
+
+.hud-combat-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  opacity: 0.92;
+}
+
 .join-panel {
   position: absolute;
   inset: 0;
