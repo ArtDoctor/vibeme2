@@ -22,20 +22,20 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
 
 ## Milestone 1.5 — Safe spawn castle
 
-- [ ] **Castle spawn zone** at world origin: a ring of box walls (cubes
+- [x] **Castle spawn zone** at world origin: a ring of box walls (cubes
       stretched into wall segments) forming a small enclosure with one gate.
       All players spawn inside it. Visually distinct (stone-grey blocks vs
       sand) so it's obvious where "home" is.
-- [ ] **Safe zone flag** on the spawn area — no PvP damage, no mob aggro,
+- [x] **Safe zone flag** on the spawn area — no PvP damage, no mob aggro,
       no mob spawning inside. Server-enforced; the client only renders the
       hint. The castle interior bounds are a single AABB the server checks
-      before applying any damage event.
-- [ ] **Gate** is open by default (no door logic in v1) — just a gap in the
+      before applying any damage event (`src/world/spawnSafeZone.ts`).
+- [x] **Gate** is open by default (no door logic in v1) — just a gap in the
       wall. Players walk out into the desert.
-- [ ] Castle walls reuse the existing `AABBCollider` system — no new
+- [x] Castle walls reuse the existing `AABBCollider` system — no new
       collider type. Walls are tall enough that step-up doesn't pop you over
       them (taller than `MAX_STEP_UP`).
-- [ ] TODO note in `DesertScene.ts` pointing here when the castle is added.
+- [x] TODO note in `DesertScene.ts` pointing here when the castle is added.
 
 ## Milestone 2 — Player avatar and combat primitives
 

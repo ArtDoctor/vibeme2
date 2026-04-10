@@ -11,6 +11,15 @@ import {
   Scene,
   Vector3,
 } from "three";
+import {
+  CASTLE_GATE_HALF_WIDTH,
+  CASTLE_WALL_HEIGHT,
+  CASTLE_WALL_THICKNESS,
+  SPAWN_COURTYARD_HALF,
+  SPAWN_SAFE_ZONE_AABB,
+  type SpawnSafeZoneAabb,
+  isPointInSpawnSafeZone,
+} from "../world/spawnSafeZone";
 import { hash2 } from "../utils/math";
 import {
   TERRAIN_HALF_SIZE,
@@ -41,11 +50,18 @@ export interface DesertWorld {
   spawn: Vector3;
   /** Soft horizontal world bounds — keeps the player on the rendered terrain. */
   worldHalfSize: number;
+  /**
+   * Castle courtyard interior — same AABB the game server uses for safe-zone rules
+   * (no PvP damage, no mob aggro, no mob spawns inside). Client: UI hint only.
+   */
+  spawnSafeZoneAabb: SpawnSafeZoneAabb;
+  pointInSpawnSafeZone(x: number, z: number): boolean;
 }
 
 const SAND_COLOR = 0xd7b56d;
 const MOUNTAIN_COLOR = 0x7a5a36;
 const ROCK_COLOR = 0x9a7a4a;
+const CASTLE_STONE_COLOR = 0x8a8780;
 const SKY_COLOR = 0xf6c98a;
 
 /**
@@ -127,7 +143,7 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   for (let i = 0; i < SMALL_MOUNTAIN_COUNT; i += 1) {
     const x = (hash2(i, 71) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
     const z = (hash2(i, 83) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
-    if (Math.hypot(x, z) < 18) continue; // keep spawn area clear
+    if (Math.hypot(x, z) < 22) continue; // keep spawn + castle clear
     const radius = 3 + hash2(i, 97) * 5;
     const height = 5 + hash2(i, 113) * 8;
     const baseY = sampleTerrainHeight(x, z);
@@ -152,7 +168,7 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   for (let i = 0; i < ROCK_COUNT; i += 1) {
     const x = (hash2(i, 5) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
     const z = (hash2(i, 7) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
-    if (Math.hypot(x, z) < 10) continue;
+    if (Math.hypot(x, z) < 14) continue;
     const w = 0.8 + hash2(i, 17) * 1.6;
     const h = 0.6 + hash2(i, 19) * 1.4;
     const d = 0.8 + hash2(i, 29) * 1.6;
@@ -174,6 +190,10 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     });
   }
 
+  // Safe spawn castle — docs/TASKS.md → Milestone 1.5. Server-side damage/aggro/spawn
+  // checks must use `spawnSafeZoneAabb` / `isPointInSpawnSafeZone` from `world/spawnSafeZone.ts`.
+  addSpawnCastle(scene, colliders, sampleTerrainHeight);
+
   // TODO(multiplayer): shops, NPCs, mob spawners, boss arenas, team flags.
   // TODO(content): replace cones with proper mountain meshes once art exists.
 
@@ -184,5 +204,63 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     colliders,
     spawn,
     worldHalfSize: TERRAIN_HALF_SIZE,
+    spawnSafeZoneAabb: SPAWN_SAFE_ZONE_AABB,
+    pointInSpawnSafeZone: isPointInSpawnSafeZone,
   };
+}
+
+/**
+ * Ring of box walls with a south gate gap; stone-grey meshes vs sand terrain.
+ * Colliders are tall AABBs — same model as mountains/rocks (`AABBCollider`).
+ */
+function addSpawnCastle(
+  scene: Scene,
+  colliders: AABBCollider[],
+  sampleGround: (x: number, z: number) => number,
+): void {
+  const half = SPAWN_COURTYARD_HALF;
+  const t = CASTLE_WALL_THICKNESS;
+  const h = CASTLE_WALL_HEIGHT;
+  const wallZSpan = 2 * half + 2 * t;
+  const wallXSpan = wallZSpan;
+
+  const stoneMat = new MeshLambertMaterial({ color: CASTLE_STONE_COLOR });
+
+  const addSegment = (cx: number, cz: number, sizeX: number, sizeZ: number): void => {
+    const baseY = sampleGround(cx, cz);
+    const mesh = new Mesh(
+      new BoxGeometry(sizeX, h, sizeZ),
+      stoneMat,
+    );
+    mesh.position.set(cx, baseY + h / 2, cz);
+    scene.add(mesh);
+
+    colliders.push({
+      minX: cx - sizeX / 2,
+      maxX: cx + sizeX / 2,
+      minZ: cz - sizeZ / 2,
+      maxZ: cz + sizeZ / 2,
+      topY: baseY + h,
+    });
+  };
+
+  const eastX = half + t / 2;
+  addSegment(eastX, 0, t, wallZSpan);
+
+  const westX = -half - t / 2;
+  addSegment(westX, 0, t, wallZSpan);
+
+  const northZ = half + t / 2;
+  addSegment(0, northZ, wallXSpan, t);
+
+  const southZ = -half - t / 2;
+  const southWestOuter = -half - t;
+  const southEastOuter = half + t;
+  const gateHalf = CASTLE_GATE_HALF_WIDTH;
+  const southLeftW = -gateHalf - southWestOuter;
+  const southRightW = southEastOuter - gateHalf;
+  const southLeftCx = (southWestOuter + -gateHalf) / 2;
+  const southRightCx = (gateHalf + southEastOuter) / 2;
+  addSegment(southLeftCx, southZ, southLeftW, t);
+  addSegment(southRightCx, southZ, southRightW, t);
 }

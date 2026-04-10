@@ -35,6 +35,8 @@ export interface FirstPersonControlsOptions {
   domElement: HTMLElement;
   world: DesertWorld;
   hudHint?: HTMLElement;
+  /** Shown while the player is inside the spawn castle safe zone (UI only). */
+  safeZoneHint?: HTMLElement;
 }
 
 export class FirstPersonControls {
@@ -48,6 +50,7 @@ export class FirstPersonControls {
   private readonly domElement: HTMLElement;
   private readonly world: DesertWorld;
   private readonly hudHint?: HTMLElement;
+  private readonly safeZoneHint?: HTMLElement;
   private readonly move = new Vector3();
   private readonly velocity = new Vector3();
 
@@ -62,6 +65,7 @@ export class FirstPersonControls {
     this.domElement = options.domElement;
     this.world = options.world;
     this.hudHint = options.hudHint;
+    this.safeZoneHint = options.safeZoneHint;
 
     this.controls = new PointerLockControls(this.camera, this.domElement);
 
@@ -85,6 +89,7 @@ export class FirstPersonControls {
     if (!this.controls.isLocked) {
       // Still apply gravity so the player settles even before locking.
       this.applyGravityOnly(delta);
+      this.updateSafeZoneHint();
       return;
     }
 
@@ -146,6 +151,8 @@ export class FirstPersonControls {
     this.state.velocity.x = this.velocity.x;
     this.state.velocity.y = this.velocity.y;
     this.state.velocity.z = this.velocity.z;
+
+    this.updateSafeZoneHint();
   }
 
   dispose(): void {
@@ -158,6 +165,13 @@ export class FirstPersonControls {
   }
 
   // ---------------------------------------------------------------- private
+
+  private updateSafeZoneHint(): void {
+    if (!this.safeZoneHint) return;
+    const { x, z } = this.camera.position;
+    const inside = this.world.pointInSpawnSafeZone(x, z);
+    this.safeZoneHint.classList.toggle("hidden", !inside);
+  }
 
   private applyGravityOnly(delta: number): void {
     this.velocity.x = 0;

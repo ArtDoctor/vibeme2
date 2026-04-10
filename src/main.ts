@@ -6,8 +6,9 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 }
 
 const hudHint = document.getElementById("hud") ?? undefined;
+const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
 
-const game = new Game({ canvas, hudHint });
+const game = new Game({ canvas, hudHint, safeZoneHint });
 game.start();
 
 // Vite HMR cleanup so dev reloads don't stack up listeners + WebGL contexts.

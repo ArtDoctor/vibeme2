@@ -13,6 +13,7 @@ import { buildDesertScene } from "../scene/DesertScene";
 export interface GameOptions {
   canvas: HTMLCanvasElement;
   hudHint?: HTMLElement;
+  safeZoneHint?: HTMLElement;
 }
 
 export class Game {
@@ -52,6 +53,7 @@ export class Game {
       domElement: this.canvas,
       world,
       hudHint: options.hudHint,
+      safeZoneHint: options.safeZoneHint,
     });
     this.controls.setSpawn(world.spawn);
 
