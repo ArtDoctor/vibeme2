@@ -102,8 +102,8 @@ The big one. Approach: client predicts using the same pure modules the server
 runs; server is authoritative; client keeps only a session token in
 `localStorage`.
 
-- [ ] **Transport**: WebSocket. Single Node process. Binary not required for
-      MVP — JSON is fine until it isn't.
+- [ ] **Transport**: WebSocket to the **Rust** server (same process that serves
+      the SPA). Binary not required for MVP — JSON is fine until it isn't.
 - [ ] **Session**: on first connect, the player picks a **nickname** in a
       simple join screen. Server validates the nickname (length, charset,
       uniqueness), issues a session token, and the client stores the token
@@ -128,8 +128,9 @@ runs; server is authoritative; client keeps only a session token in
       interpolates remote players.
 - [ ] **Cheat surface**: assume the client is hostile. Never trust an HP
       delta or an inventory change from the client. Only trust intents.
-- [ ] **Deployment**: single VPS, Nginx in front, Node game server on a
-      private port. Vite static `dist/` served by Nginx.
+- [ ] **Deployment**: **Docker Compose** stack; **Rust** backend serves the Vite
+      `dist/` static assets **and** all WebSocket/API endpoints for multiplayer
+      and server authority (single HTTP entry; map port 80 in Coolify as usual).
 
 ## Milestone 7 — Polish and content
 

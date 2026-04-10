@@ -39,6 +39,30 @@ giant file. So:
 New systems (mobs, networking, UI overlays) follow the same shape: a builder
 function that returns an interface, and a register call from `Game.ts`.
 
+## Deployment (planned)
+
+Production is meant to run from **Docker Compose**: one stack you can point
+Coolify (or any host) at, instead of juggling separate frontend-only and
+backend-only deploys by default.
+
+The **server is a Rust binary** that:
+
+- Serves the built **Vite frontend** (`dist/` assets: `index.html`, hashed JS/CSS,
+  `public/` copies) from the same process that handles **all server concerns** —
+  WebSockets, REST (if any), auth/session, authoritative game simulation, and
+  persistence. No separate Nginx-only container required for the happy path;
+  the Rust app is the single HTTP entry (Compose still maps **expose 80** →
+  container port as usual).
+
+- Exposes **endpoints for all server-side behavior** (multiplayer sync, economy,
+  combat validation, etc.). The browser client keeps only **session state**
+  (e.g. token) and talks to this server; it never is the source of truth for
+  world or inventory.
+
+The **frontend** continues to be developed and built with Vite locally (`npm run
+build`); the Rust server embeds or serves that output in production. Exact crate
+layout (e.g. `server/` next to `src/`) is left to implementation.
+
 ## Collision model
 
 vibeme (the previous prototype) used a `Raycaster` straight down for ground
