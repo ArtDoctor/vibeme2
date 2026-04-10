@@ -1,8 +1,9 @@
 /**
  * Headless smoke test:
- *   1. Run the production build (`npm run build` → tsc + vite build).
- *   2. Boot `vite preview` on a private port.
- *   3. Verify GET / returns 2xx.
+ *   1. Unit tests (`npm run test`).
+ *   2. Production build (`npm run build` → tsc + vite build).
+ *   3. Boot `vite preview` on a private port.
+ *   4. Verify GET / returns 2xx.
  *
  * Cross-platform — pure Node, no curl/bash. Used in CI and locally after any
  * substantive change. See docs/RULES.md.
@@ -37,6 +38,7 @@ async function waitForOk() {
 
 let preview;
 try {
+  execSync("npm run test", { cwd: root, stdio: "inherit", shell: true });
   execSync("npm run build", { cwd: root, stdio: "inherit", shell: true });
 
   preview = spawn(

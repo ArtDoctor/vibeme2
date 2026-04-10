@@ -1,5 +1,36 @@
-node_modules
-dist
-.DS_Store
+# Dependencies & build output
+node_modules/
+dist/
+.vite/
+
+# Rust
+server/target/
+
+# Logs & caches
 *.log
-.vite
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+.cache/
+
+# Environment (secrets)
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors (keep shared project settings; ignore user-specific)
+.idea/
+*.swp
+*.swo
+*~
+
+# Test / coverage
+coverage/
+.vitest/

@@ -17,11 +17,17 @@ src/
                                 render mesh AND the player ground sampler so they
                                 cannot drift out of sync.
   player/
-    FirstPersonControls.ts      Input + kinematic movement + collision resolution.
+    FirstPersonControls.ts      Input + kinematic movement; uses `circleAabbXZ`.
+    circleAabbXZ.ts             Pure circle-vs-AABB XZ resolution (tested). Server
+                                mirrors the same math in `server/src/world.rs`.
     PlayerState.ts              Plain interface — will be mirrored server-side.
   utils/
     math.ts                     `clamp`, `hash2`. No business logic.
 ```
+
+The **`server/`** crate (not under `src/`) is the production HTTP + WebSocket entry:
+it serves the Vite `dist/` assets and runs authoritative movement validation
+(`server/src/validate.rs`) against the shared terrain + collider data.
 
 ### Why this split
 

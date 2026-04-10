@@ -8,6 +8,21 @@
   </head>
   <body>
     <div id="app">
+      <div id="join-panel" class="join-panel" aria-live="polite">
+        <h1 class="join-title">vibeme2</h1>
+        <p class="join-sub">Choose a nickname to join the realm.</p>
+        <label class="join-label" for="join-nickname">Nickname</label>
+        <input
+          id="join-nickname"
+          class="join-input"
+          type="text"
+          maxlength="24"
+          autocomplete="username"
+          placeholder="e.g. desert_knight"
+        />
+        <button id="join-submit" type="button" class="join-submit">Enter world</button>
+        <p id="join-error" class="join-error hidden" role="alert"></p>
+      </div>
       <canvas id="game-canvas"></canvas>
       <div id="hud-safe" class="hud-safe hidden" aria-live="polite">
         Safe zone — no PvP, no mobs

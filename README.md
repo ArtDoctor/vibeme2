@@ -13,10 +13,14 @@ Architecture and collision-model limits are documented in
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173
+npm run dev          # http://localhost:5173 — run the Rust server separately for /ws
+npm run test         # Vitest (unit tests)
 npm run build        # tsc + vite build
-npm run smoke:ci     # build + boot vite preview + GET / smoke test
+npm run smoke:ci     # test + build + vite preview + GET / smoke test
+npm run server       # cargo run — serves dist/ + WebSocket (after npm run build)
 ```
+
+Rust tests: `cargo test --manifest-path server/Cargo.toml`
 
 Click the canvas to lock the mouse. **WASD** to move, **Space** to jump,
 **Esc** to release the mouse.

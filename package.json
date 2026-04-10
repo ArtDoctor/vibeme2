@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "smoke:ci": "node scripts/smoke-ci.mjs"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:ci": "node scripts/smoke-ci.mjs",
+    "server": "cargo run --manifest-path server/Cargo.toml"
   },
   "dependencies": {
     "three": "^0.172.0"
@@ -15,6 +18,7 @@
   "devDependencies": {
     "@types/three": "^0.183.1",
     "typescript": "~5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.0.5"
   }
 }

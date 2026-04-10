@@ -1,8 +1,9 @@
 node_modules
 dist
+server/target
 .git
 .gitignore
-.cursor
 *.md
-.env
-.env.*
+.vscode
+.cursor
+terminals

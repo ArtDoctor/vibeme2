@@ -102,35 +102,32 @@ The big one. Approach: client predicts using the same pure modules the server
 runs; server is authoritative; client keeps only a session token in
 `localStorage`.
 
-- [ ] **Transport**: WebSocket to the **Rust** server (same process that serves
-      the SPA). Binary not required for MVP — JSON is fine until it isn't.
-- [ ] **Session**: on first connect, the player picks a **nickname** in a
-      simple join screen. Server validates the nickname (length, charset,
-      uniqueness), issues a session token, and the client stores the token
-      in `localStorage` under `vibeme2.session`. Reconnect resumes the same
-      character with the same nickname. Nickname is immutable for the life
-      of the character (permadeath wipes it along with everything else).
-- [ ] **Nickname labels above players**: every other player you can see
-      renders their nickname as a small floating label above their head
-      (billboarded sprite or DOM overlay — whichever is cheaper). Own
-      nickname is hidden in first-person. Team color tints the label.
+- [x] **Transport**: WebSocket to the **Rust** server (same process that serves
+      the SPA). JSON messages (`server/`, `/ws`).
+- [x] **Session**: join screen → nickname validation → `welcome` with session
+      UUID → `localStorage` key `vibeme2.session`. Reconnect sends the same token.
+      In-memory nick uniqueness for connected players; persistence across deploys
+      not done yet.
+- [x] **Nickname labels above players**: canvas-texture sprites above remote
+      box avatars. Own avatar hidden (first-person). Team tint: still todo
+      (Milestone 5).
 - [ ] **Money leaderboard (top-right HUD)**: persistent panel listing the
       top N players by gold, updated from server broadcasts. Shows nickname,
       team color dot, gold amount. Visible to everyone. Server is the only
       source — client never computes ranks locally.
-- [ ] **State authority**: server holds the only copy of inventory, gold,
-      HP, mob HP, mob positions, player coordinates. Client sends inputs
-      ("I want to move +x +z, swing sword"), server resolves and broadcasts.
-- [ ] **Movement validation**: server runs the same `sampleTerrainHeight`
-      and same AABB resolver against the same world data. If the client's
-      reported position drifts past a tolerance, server snaps it back.
-- [ ] **Tick rate**: 20 Hz simulation, broadcast deltas at 20 Hz, client
-      interpolates remote players.
-- [ ] **Cheat surface**: assume the client is hostile. Never trust an HP
-      delta or an inventory change from the client. Only trust intents.
-- [ ] **Deployment**: **Docker Compose** stack; **Rust** backend serves the Vite
-      `dist/` static assets **and** all WebSocket/API endpoints for multiplayer
-      and server authority (single HTTP entry; map port 80 in Coolify as usual).
+- [~] **State authority**: server is authoritative for **player positions**
+      (validated each input). Inventory, gold, HP, mobs — still todo
+      (Milestones 2–4).
+- [x] **Movement validation**: Rust uses the same terrain function + collider
+      list as `DesertScene` / `terrain.ts`, clamps speed, resolves AABBs, snaps
+      ground (see `server/src/world.rs`, `server/src/validate.rs`).
+- [~] **Tick rate**: 20 Hz snapshots over WebSocket; remote poses snap (no
+      interpolation yet).
+- [~] **Cheat surface**: positions derived from client-reported pose with
+      server clamp + collision; no inventory/HP yet.
+- [~] **Deployment**: **Dockerfile** at repo root (Node build + `cargo build`,
+      runtime serves `dist/` + `/ws`). Docker Compose file still optional;
+      Coolify can build/run the Dockerfile directly.
 
 ## Milestone 7 — Polish and content
 
@@ -144,10 +141,11 @@ runs; server is authoritative; client keeps only a session token in
 
 ## Tooling backlog
 
-- [ ] Unit test runner (vitest). Cover `scene/terrain.ts`, `utils/math.ts`,
-      and the collision resolver in `FirstPersonControls.ts` first.
+- [x] Unit test runner (**Vitest**). Tests in `src/**/*.test.ts`: `utils/math.ts`,
+      `scene/terrain.ts`, `player/circleAabbXZ.ts`. Rust: `cargo test` in `server/`
+      for `world` + `validate`.
 - [ ] Lint (eslint or biome). The strict tsconfig already catches a lot.
-- [ ] CI workflow (GitHub Actions or similar) running `npm run smoke:ci`.
+- [x] CI workflow (`.github/workflows/ci.yml`): `npm run smoke:ci` + `cargo test`.
 - [ ] Bundle size budget in `vite.config.ts`.
 
 ## Out of scope (for now)

@@ -1,8 +1,11 @@
 import { Camera, Vector3 } from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
-import type { AABBCollider, DesertWorld } from "../scene/DesertScene";
-import { clamp } from "../utils/math";
+import { EYE_HEIGHT, PLAYER_RADIUS } from "../game/constants";
+import type { DesertWorld } from "../scene/DesertScene";
 import type { PlayerState } from "./PlayerState";
+import { iterativelyResolvePlayerXz } from "./circleAabbXZ";
+
+export { EYE_HEIGHT };
 
 /**
  * First-person controls + simple kinematic physics.
@@ -20,8 +23,6 @@ import type { PlayerState } from "./PlayerState";
  *     once multiplayer lands (docs/TASKS.md).
  */
 
-const EYE_HEIGHT = 1.65;
-const PLAYER_RADIUS = 0.35;
 const MOVE_SPEED = 7.5;
 const JUMP_SPEED = 6.0;
 const GRAVITY = 24;
@@ -117,10 +118,16 @@ export class FirstPersonControls {
     this.camera.position.x += this.velocity.x * delta;
     this.camera.position.z += this.velocity.z * delta;
 
-    for (let iter = 0; iter < 4; iter += 1) {
-      this.resolveWorldBounds();
-      this.resolveColliders();
-    }
+    const collisionFeetY = this.camera.position.y - EYE_HEIGHT;
+    const resolved = iterativelyResolvePlayerXz(
+      this.camera.position.x,
+      this.camera.position.z,
+      collisionFeetY,
+      this.world.colliders,
+      { playerRadius: PLAYER_RADIUS, worldHalfSize: this.world.worldHalfSize },
+    );
+    this.camera.position.x = resolved.x;
+    this.camera.position.z = resolved.z;
 
     // ---- Integrate Y, then snap to ground ----
     this.camera.position.y += this.velocity.y * delta;
@@ -155,6 +162,19 @@ export class FirstPersonControls {
     this.updateSafeZoneHint();
   }
 
+  /** Eye position + view angles for multiplayer sync (radians, YXZ order). */
+  getNetworkPose(): {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    pitch: number;
+  } {
+    const p = this.camera.position;
+    const r = this.camera.rotation;
+    return { x: p.x, y: p.y, z: p.z, yaw: r.y, pitch: r.x };
+  }
+
   dispose(): void {
     this.domElement.removeEventListener("click", this.onCanvasClick);
     document.removeEventListener("keydown", this.onKeyDown);
@@ -186,72 +206,6 @@ export class FirstPersonControls {
       this.camera.position.y = groundY + EYE_HEIGHT;
       this.velocity.y = 0;
       this.state.onGround = true;
-    }
-  }
-
-  private resolveWorldBounds(): void {
-    const limit = this.world.worldHalfSize - 1;
-    this.camera.position.x = clamp(this.camera.position.x, -limit, limit);
-    this.camera.position.z = clamp(this.camera.position.z, -limit, limit);
-  }
-
-  /** Push the player out of every overlapping AABB in XZ (circle-vs-box). */
-  private resolveColliders(): void {
-    const feetY = this.camera.position.y - EYE_HEIGHT;
-    for (const c of this.world.colliders) {
-      // Skip obstacles entirely below us (we walked over them).
-      if (feetY > c.topY - 0.05) continue;
-      this.resolveOneCollider(c);
-    }
-  }
-
-  private resolveOneCollider(c: AABBCollider): void {
-    const px = this.camera.position.x;
-    const pz = this.camera.position.z;
-    const cx = clamp(px, c.minX, c.maxX);
-    const cz = clamp(pz, c.minZ, c.maxZ);
-    const dx = px - cx;
-    const dz = pz - cz;
-    const dist = Math.hypot(dx, dz);
-
-    if (dist >= PLAYER_RADIUS - 1e-6) {
-      return;
-    }
-
-    if (dist > 1e-7) {
-      const push = (PLAYER_RADIUS - dist) / dist;
-      this.camera.position.x += dx * push;
-      this.camera.position.z += dz * push;
-      return;
-    }
-
-    // Player center is exactly inside the box — push out along the nearest face.
-    const dMinX = px - c.minX;
-    const dMaxX = c.maxX - px;
-    const dMinZ = pz - c.minZ;
-    const dMaxZ = c.maxZ - pz;
-    let m = dMinX;
-    let ax = -1;
-    let az = 0;
-    if (dMaxX < m) {
-      m = dMaxX;
-      ax = 1;
-      az = 0;
-    }
-    if (dMinZ < m) {
-      m = dMinZ;
-      ax = 0;
-      az = -1;
-    }
-    if (dMaxZ < m) {
-      m = dMaxZ;
-      ax = 0;
-      az = 1;
-    }
-    const push = PLAYER_RADIUS + 0.02 - m;
-    if (push > 0) {
-      this.camera.position.x += ax * push;
-      this.camera.position.z += az * push;
     }
   }
 

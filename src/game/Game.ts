@@ -1,6 +1,9 @@
 import { Clock, PerspectiveCamera, Scene, WebGLRenderer } from "three";
+import type { MultiplayerClient } from "../net/multiplayer";
+import type { SnapshotMsg } from "../net/types";
 import { FirstPersonControls } from "../player/FirstPersonControls";
 import { buildDesertScene } from "../scene/DesertScene";
+import { RemotePlayers } from "./RemotePlayers";
 
 /**
  * Owns the renderer, scene, camera, animation loop, resize handler, and dispose.
@@ -14,6 +17,8 @@ export interface GameOptions {
   canvas: HTMLCanvasElement;
   hudHint?: HTMLElement;
   safeZoneHint?: HTMLElement;
+  /** When set, other players are rendered for this connection. */
+  localPlayerId?: string;
 }
 
 export class Game {
@@ -24,6 +29,8 @@ export class Game {
   private readonly clock = new Clock();
   private readonly controls: FirstPersonControls;
   private readonly resizeHandler: () => void;
+  private readonly remotePlayers: RemotePlayers | null;
+  private multiplayer: MultiplayerClient | null = null;
   private animationId: number | null = null;
   private disposed = false;
 
@@ -57,10 +64,27 @@ export class Game {
     });
     this.controls.setSpawn(world.spawn);
 
+    this.remotePlayers =
+      options.localPlayerId !== undefined
+        ? new RemotePlayers(this.scene, options.localPlayerId)
+        : null;
+
     this.resizeHandler = (): void => this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
     // Trigger once so we match whatever the initial canvas size is.
     this.handleResize();
+  }
+
+  /** Wire authoritative snapshots + outbound pose after `MultiplayerClient.connect`. */
+  attachMultiplayer(client: MultiplayerClient): void {
+    if (this.disposed) return;
+    this.multiplayer = client;
+    client.startSending(() => this.controls.getNetworkPose());
+  }
+
+  applyRemoteSnapshot(msg: SnapshotMsg): void {
+    if (this.disposed || !this.remotePlayers) return;
+    this.remotePlayers.applySnapshot(msg.players);
   }
 
   start(): void {
@@ -84,6 +108,9 @@ export class Game {
       this.animationId = null;
     }
     window.removeEventListener("resize", this.resizeHandler);
+    this.multiplayer?.dispose();
+    this.multiplayer = null;
+    this.remotePlayers?.dispose();
     this.controls.dispose();
     this.renderer.dispose();
   }
