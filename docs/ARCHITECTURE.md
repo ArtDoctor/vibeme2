@@ -32,7 +32,7 @@ src/
     math.ts                     `clamp`, `hash2`. No business logic.
 ```
 
-The **`server/`** crate (not under `src/`) is the production HTTP + WebSocket entry:
+The `**server/**` crate (not under `src/`) is the production HTTP + WebSocket entry:
 it serves the Vite `dist/` assets and runs authoritative movement validation
 (`server/src/validate.rs`) against the shared terrain + collider data.
 Authoritative combat (melee, arrows, HP/stamina, death/respawn) lives in
@@ -45,11 +45,11 @@ The instruction was: don't put collision rules and level geometry in the same
 giant file. So:
 
 - `DesertScene.ts` knows nothing about the player. It builds meshes and emits
-  a `DesertWorld` interface (`sampleGroundHeight`, `colliders`, `spawn`,
-  `worldHalfSize`).
+a `DesertWorld` interface (`sampleGroundHeight`, `colliders`, `spawn`,
+`worldHalfSize`).
 - `FirstPersonControls.ts` knows nothing about meshes. It only consumes the
-  `DesertWorld` interface. Swap the desert for a forest by writing a new
-  `buildForestScene` that returns the same shape — controls don't change.
+`DesertWorld` interface. Swap the desert for a forest by writing a new
+`buildForestScene` that returns the same shape — controls don't change.
 - `Game.ts` is the only place that imports both sides. It is the wiring layer.
 
 New systems (mobs, networking, UI overlays) follow the same shape: a builder
@@ -64,19 +64,17 @@ backend-only deploys by default.
 The **server is a Rust binary** that:
 
 - Serves the built **Vite frontend** (`dist/` assets: `index.html`, hashed JS/CSS,
-  `public/` copies) from the same process that handles **all server concerns** —
-  WebSockets, REST (if any), auth/session, authoritative game simulation, and
-  persistence. No separate Nginx-only container required for the happy path;
-  the Rust app is the single HTTP entry (Compose still maps **expose 80** →
-  container port as usual).
-
+`public/` copies) from the same process that handles **all server concerns** —
+WebSockets, REST (if any), auth/session, authoritative game simulation, and
+persistence. No separate Nginx-only container required for the happy path;
+the Rust app is the single HTTP entry (Compose still maps **expose 80** →
+container port as usual).
 - Exposes **endpoints for all server-side behavior** (multiplayer sync, economy,
-  combat validation, etc.). The browser client keeps only **session state**
-  (e.g. token) and talks to this server; it never is the source of truth for
-  world or inventory.
+combat validation, etc.). The browser client keeps only **session state**
+(e.g. token) and talks to this server; it never is the source of truth for
+world or inventory.
 
-The **frontend** continues to be developed and built with Vite locally (`npm run
-build`); the Rust server embeds or serves that output in production. Exact crate
+The **frontend** continues to be developed and built with Vite locally (`npm run build`); the Rust server embeds or serves that output in production. Exact crate
 layout (e.g. `server/` next to `src/`) is left to implementation.
 
 ## Collision model
@@ -93,9 +91,9 @@ render mesh and the player query it.
 - ✅ Cheap (a few sin/cos), deterministic, no allocation, can never tunnel.
 - ✅ Identical across client and (future) server — same function, same answer.
 - ❌ **Heightfield only.** No caves, no overhangs, no second floors. The
-  function returns one Y per (X, Z).
+function returns one Y per (X, Z).
 - ❌ Step-up tolerance is fixed at `MAX_STEP_UP = 0.6 m`. Sharper cliffs are
-  walls, not ramps.
+walls, not ramps.
 
 If we ever need overhangs, this becomes a swept-volume test against real
 geometry, which is a much bigger change. Don't bolt a raycast onto this
@@ -107,16 +105,16 @@ function — write the new system properly.
 penetration with circle-vs-box separation in XZ, four iterations per frame.
 
 - ✅ No rotation, no matrix work each frame — colliders are precomputed at
-  scene build time.
+scene build time.
 - ✅ The four-iteration sub-step is enough to escape multi-box overlaps at
-  normal walking speeds.
+normal walking speeds.
 - ❌ **No rotated boxes.** If a future asset needs an angled wall, build it
-  as several axis-aligned boxes or upgrade the collider type.
+as several axis-aligned boxes or upgrade the collider type.
 - ❌ **No vertical collision against AABBs.** We treat them as walls only;
-  if `feetY > collider.topY` we ignore them (you walk over short rocks).
-  Boxes that should act like ceilings are not supported yet.
+if `feetY > collider.topY` we ignore them (you walk over short rocks).
+Boxes that should act like ceilings are not supported yet.
 - ❌ **Fast teleports can skip through.** Normal walk speed is fine; a future
-  dash/blink ability needs a swept test or server reconciliation.
+dash/blink ability needs a swept test or server reconciliation.
 
 ### Server reconciliation (future)
 

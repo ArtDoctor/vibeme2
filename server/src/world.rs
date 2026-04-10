@@ -156,14 +156,26 @@ fn clamp(v: f64, min_v: f64, max_v: f64) -> f64 {
 
 /// Circle-vs-AABB separation in XZ (matches `FirstPersonControls.ts`).
 pub fn resolve_colliders(px: &mut f64, py: &mut f64, pz: &mut f64, colliders: &[AabbCollider]) {
-    let feet_y = *py - EYE_HEIGHT;
+    resolve_colliders_entity(px, py, pz, colliders, EYE_HEIGHT, PLAYER_RADIUS);
+}
+
+/// Same resolver with a custom eye height and XZ circle radius (e.g. small mobs).
+pub fn resolve_colliders_entity(
+    px: &mut f64,
+    py: &mut f64,
+    pz: &mut f64,
+    colliders: &[AabbCollider],
+    eye_height: f64,
+    radius: f64,
+) {
+    let feet_y = *py - eye_height;
     for _ in 0..4 {
         resolve_world_bounds(px, pz);
         for c in colliders {
             if feet_y > c.top_y - 0.05 {
                 continue;
             }
-            resolve_one_collider(px, pz, c);
+            resolve_one_collider(px, pz, c, radius);
         }
     }
 }
@@ -174,19 +186,19 @@ fn resolve_world_bounds(px: &mut f64, pz: &mut f64) {
     *pz = clamp(*pz, -limit, limit);
 }
 
-fn resolve_one_collider(px: &mut f64, pz: &mut f64, c: &AabbCollider) {
+fn resolve_one_collider(px: &mut f64, pz: &mut f64, c: &AabbCollider, radius: f64) {
     let cx = clamp(*px, c.min_x, c.max_x);
     let cz = clamp(*pz, c.min_z, c.max_z);
     let dx = *px - cx;
     let dz = *pz - cz;
     let dist = (dx * dx + dz * dz).sqrt();
 
-    if dist >= PLAYER_RADIUS - 1e-6 {
+    if dist >= radius - 1e-6 {
         return;
     }
 
     if dist > 1e-7 {
-        let push = (PLAYER_RADIUS - dist) / dist;
+        let push = (radius - dist) / dist;
         *px += dx * push;
         *pz += dz * push;
         return;
@@ -214,7 +226,7 @@ fn resolve_one_collider(px: &mut f64, pz: &mut f64, c: &AabbCollider) {
         ax = 0.0;
         az = 1.0;
     }
-    let push = PLAYER_RADIUS + 0.02 - m;
+    let push = radius + 0.02 - m;
     if push > 0.0 {
         *px += ax * push;
         *pz += az * push;
@@ -223,16 +235,20 @@ fn resolve_one_collider(px: &mut f64, pz: &mut f64, c: &AabbCollider) {
 
 /// Snap feet to terrain and small step-ups (aligned with client behavior).
 pub fn snap_to_ground(py: &mut f64, px: f64, pz: f64) {
+    snap_to_ground_with_eye(py, px, pz, EYE_HEIGHT);
+}
+
+pub fn snap_to_ground_with_eye(py: &mut f64, px: f64, pz: f64, eye_height: f64) {
     let ground_y = sample_terrain_height(px, pz);
-    let target_eye_y = ground_y + EYE_HEIGHT;
-    let mut feet_y = *py - EYE_HEIGHT;
+    let target_eye_y = ground_y + eye_height;
+    let mut feet_y = *py - eye_height;
     if feet_y <= ground_y + GROUND_EPSILON {
         *py = target_eye_y;
         return;
     }
-    feet_y = *py - EYE_HEIGHT;
+    feet_y = *py - eye_height;
     if feet_y < ground_y && ground_y - feet_y <= MAX_STEP_UP {
-        *py = ground_y + EYE_HEIGHT;
+        *py = ground_y + eye_height;
     }
 }
 

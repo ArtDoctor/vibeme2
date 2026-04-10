@@ -8,8 +8,11 @@ pub const MAX_HP: f64 = 100.0;
 pub const MAX_STAMINA: f64 = 100.0;
 pub const MELEE_DAMAGE: f64 = 25.0;
 pub const ARROW_DAMAGE: f64 = 18.0;
-pub const MELEE_RANGE: f64 = 1.35;
-pub const MELEE_MIN_FORWARD_DOT: f64 = 0.6427876096865393; // cos(50°)
+pub const MELEE_RANGE: f64 = 1.47;
+/// Melee hit volume: rectangle in the attacker's forward/right plane (XZ), in front of the body.
+pub const MELEE_BOX_FORWARD_MIN: f64 = 0.34;
+pub const MELEE_BOX_FORWARD_MAX: f64 = MELEE_RANGE;
+pub const MELEE_BOX_HALF_WIDTH: f64 = 0.38;
 
 pub const STAMINA_REGEN_PER_S: f64 = 18.0;
 pub const STAMINA_MELEE: f64 = 15.0;
@@ -85,19 +88,15 @@ pub fn melee_hit_valid(
 ) -> bool {
     let dx = tx - ax;
     let dz = tz - az;
-    let dist_sq = dx * dx + dz * dz;
-    if dist_sq > MELEE_RANGE * MELEE_RANGE {
+    let (fx, fz) = forward_from_yaw(a_yaw);
+    let f_dot = dx * fx + dz * fz;
+    if f_dot < MELEE_BOX_FORWARD_MIN || f_dot > MELEE_BOX_FORWARD_MAX {
         return false;
     }
-    let (fx, fz) = forward_from_yaw(a_yaw);
-    let dist = dist_sq.sqrt();
-    if dist < 1e-8 {
-        return cylinders_vertical_overlap(a_eye_y, t_eye_y);
-    }
-    let ndx = dx / dist;
-    let ndz = dz / dist;
-    let dot = fx * ndx + fz * ndz;
-    if dot < MELEE_MIN_FORWARD_DOT {
+    let rx = a_yaw.cos();
+    let rz = a_yaw.sin();
+    let r_dot = dx * rx + dz * rz;
+    if r_dot.abs() > MELEE_BOX_HALF_WIDTH {
         return false;
     }
     cylinders_vertical_overlap(a_eye_y, t_eye_y)
@@ -157,6 +156,8 @@ pub struct Arrow {
     pub vz: f64,
     /// When true, shield frontal blocks completely (boss heavy shot).
     pub heavy: bool,
+    /// When false, arrow still flies but does not apply HP damage (fired from spawn safe zone).
+    pub deals_damage: bool,
 }
 
 pub fn integrate_arrow(a: &mut Arrow, dt: f64) {
@@ -166,15 +167,28 @@ pub fn integrate_arrow(a: &mut Arrow, dt: f64) {
     a.vy -= ARROW_GRAVITY * dt;
 }
 
-/// Point arrow vs vertical cylinder at player feet (XZ circle + Y slab).
-pub fn arrow_hits_player(ax: f64, ay: f64, az: f64, px: f64, eye_y: f64, pz: f64) -> bool {
+/// Point arrow vs vertical cylinder (XZ circle + Y slab). `flat_radius` is XZ hit radius.
+pub fn arrow_hits_vertical_cylinder(
+    ax: f64,
+    ay: f64,
+    az: f64,
+    px: f64,
+    eye_y: f64,
+    pz: f64,
+    flat_radius: f64,
+) -> bool {
     let dx = px - ax;
     let dz = pz - az;
-    if dx * dx + dz * dz > PLAYER_RADIUS * PLAYER_RADIUS * 1.44 {
+    if dx * dx + dz * dz > flat_radius * flat_radius * 1.44 {
         return false;
     }
     let feet = feet_y(eye_y);
     ay >= feet - 0.08 && ay <= feet + HIT_CYLINDER_HEIGHT + 0.08
+}
+
+/// Point arrow vs vertical cylinder at player feet (XZ circle + Y slab).
+pub fn arrow_hits_player(ax: f64, ay: f64, az: f64, px: f64, eye_y: f64, pz: f64) -> bool {
+    arrow_hits_vertical_cylinder(ax, ay, az, px, eye_y, pz, PLAYER_RADIUS)
 }
 
 pub fn spawn_arrow_from_player(
@@ -185,6 +199,7 @@ pub fn spawn_arrow_from_player(
     z: f64,
     yaw: f64,
     pitch: f64,
+    deals_damage: bool,
 ) -> Arrow {
     let (fx, fz) = forward_from_yaw(yaw);
     let c = pitch.cos();
@@ -207,6 +222,7 @@ pub fn spawn_arrow_from_player(
         vy,
         vz,
         heavy: false,
+        deals_damage,
     }
 }
 
@@ -231,5 +247,11 @@ mod tests {
     fn melee_behind_misses() {
         let eye = 2.0;
         assert!(!melee_hit_valid(0.0, 0.0, 0.0, eye, 0.0, 1.0, eye));
+    }
+
+    #[test]
+    fn melee_wide_lateral_misses() {
+        let eye = 2.0;
+        assert!(!melee_hit_valid(0.0, 0.0, 0.0, eye, 0.55, -1.0, eye));
     }
 }

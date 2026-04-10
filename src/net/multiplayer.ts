@@ -1,4 +1,5 @@
 import type { SnapshotMsg, WelcomeMsg } from "./types";
+import { normalizeSnapshotMsg } from "./snapshotNormalize";
 
 const DEFAULT_SESSION_KEY = "vibeme2.session";
 
@@ -18,7 +19,7 @@ export class MultiplayerClient {
   private readonly ws: WebSocket;
   private readonly localPlayerId: string;
   private readonly sessionKey: string;
-  private readonly onSnapshot: (msg: SnapshotMsg) => void;
+  private readonly onSnapshot: (msg: SnapshotMsg, localPlayerId: string) => void;
   private sendInterval: ReturnType<typeof setInterval> | null = null;
   private getInputPayload: (() => {
     x: number;
@@ -37,7 +38,7 @@ export class MultiplayerClient {
   private constructor(
     ws: WebSocket,
     welcome: WelcomeMsg,
-    onSnapshot: (msg: SnapshotMsg) => void,
+    onSnapshot: (msg: SnapshotMsg, localPlayerId: string) => void,
   ) {
     this.ws = ws;
     this.localPlayerId = welcome.playerId;
@@ -54,7 +55,7 @@ export class MultiplayerClient {
       try {
         const data = JSON.parse(ev.data as string) as { type?: string };
         if (data.type === "snapshot") {
-          this.onSnapshot(data as SnapshotMsg);
+          this.onSnapshot(normalizeSnapshotMsg(data), this.localPlayerId);
         }
       } catch {
         /* ignore malformed */
@@ -64,7 +65,7 @@ export class MultiplayerClient {
 
   static connect(
     options: MultiplayerOptions,
-    onSnapshot: (msg: SnapshotMsg) => void,
+    onSnapshot: (msg: SnapshotMsg, localPlayerId: string) => void,
   ): Promise<MultiplayerClient> {
     const hadSession = options.session !== null;
     return MultiplayerClient.connectOnce(options, onSnapshot).catch((err) => {
@@ -81,7 +82,7 @@ export class MultiplayerClient {
 
   private static connectOnce(
     options: MultiplayerOptions,
-    onSnapshot: (msg: SnapshotMsg) => void,
+    onSnapshot: (msg: SnapshotMsg, localPlayerId: string) => void,
   ): Promise<MultiplayerClient> {
     const ws = new WebSocket(wsUrlFromPage());
     return new Promise((resolve, reject) => {

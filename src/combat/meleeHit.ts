@@ -2,8 +2,9 @@ import { EYE_HEIGHT } from "../game/constants";
 import {
   forwardFromCameraYaw,
   HIT_CYLINDER_HEIGHT,
-  MELEE_MIN_FORWARD_DOT,
-  MELEE_RANGE,
+  MELEE_BOX_FORWARD_MAX,
+  MELEE_BOX_FORWARD_MIN,
+  MELEE_BOX_HALF_WIDTH,
 } from "./constants";
 
 export interface FeetPosition {
@@ -13,7 +14,7 @@ export interface FeetPosition {
 }
 
 /**
- * Returns true if `target` is within melee cone and range of `attacker`.
+ * Returns true if `target` lies inside the melee hit box in front of `attacker`.
  * Pure helper — server runs the authoritative check in Rust.
  */
 export function isInMeleeArc(
@@ -26,19 +27,16 @@ export function isInMeleeArc(
   const tfz = target.z;
   const dx = tfx - afx;
   const dz = tfz - afz;
-  const distSq = dx * dx + dz * dz;
-  if (distSq > MELEE_RANGE * MELEE_RANGE) {
+  const y = attacker.yaw;
+  const f = forwardFromCameraYaw(y);
+  const fDot = dx * f.x + dz * f.z;
+  if (fDot < MELEE_BOX_FORWARD_MIN || fDot > MELEE_BOX_FORWARD_MAX) {
     return false;
   }
-  if (distSq < 1e-8) {
-    return true;
-  }
-  const inv = 1 / Math.sqrt(distSq);
-  const ndx = dx * inv;
-  const ndz = dz * inv;
-  const f = forwardFromCameraYaw(attacker.yaw);
-  const dot = f.x * ndx + f.z * ndz;
-  if (dot < MELEE_MIN_FORWARD_DOT) {
+  const rx = Math.cos(y);
+  const rz = Math.sin(y);
+  const rDot = dx * rx + dz * rz;
+  if (Math.abs(rDot) > MELEE_BOX_HALF_WIDTH) {
     return false;
   }
 

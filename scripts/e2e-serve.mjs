@@ -8,6 +8,7 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import treeKill from "tree-kill";
+import { killStaleServerAndWaitForUnlock } from "./kill-stale-server.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -40,6 +41,8 @@ async function waitForPortWhileProcessRuns(port, proc, timeoutMs) {
 
 const serverTimeout = Number(process.env.E2E_SERVER_WAIT_MS ?? 300_000);
 const viteTimeout = Number(process.env.E2E_VITE_WAIT_MS ?? 120_000);
+
+await killStaleServerAndWaitForUnlock();
 
 const serverProc = spawn("cargo", ["run", "--manifest-path", "server/Cargo.toml"], {
   cwd: root,

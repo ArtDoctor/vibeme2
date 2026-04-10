@@ -23,7 +23,22 @@
         <button id="join-submit" type="button" class="join-submit">Enter world</button>
         <p id="join-error" class="join-error hidden" role="alert"></p>
       </div>
+      <div id="death-panel" class="death-panel hidden" role="dialog" aria-modal="true" aria-labelledby="death-title">
+        <h2 id="death-title" class="death-title">You died</h2>
+        <p class="death-sub">You respawn at the castle. Gold carried was lost.</p>
+        <div class="death-actions">
+          <button id="death-continue" type="button" class="death-btn death-btn--primary">Continue</button>
+          <button id="death-menu" type="button" class="death-btn death-btn--secondary">Return to menu</button>
+        </div>
+      </div>
       <canvas id="game-canvas"></canvas>
+      <div id="hud-compass" class="hud-compass hidden" aria-hidden="true">
+        <div class="hud-compass-strip-wrap">
+          <div data-compass-track class="hud-compass-track"></div>
+          <div class="hud-compass-pointer" aria-hidden="true"></div>
+        </div>
+        <div data-compass-enemies class="hud-compass-enemies"></div>
+      </div>
       <div id="hud-safe" class="hud-safe hidden" aria-live="polite">
         Safe zone — no PvP, no mobs
       </div>
@@ -38,9 +53,26 @@
           <div class="hud-bar"><div class="hud-bar-fill hud-st" data-stamina-fill></div></div>
           <span data-stamina>100</span>
         </div>
+        <div
+          class="weapon-bar"
+          role="group"
+          aria-label="Weapons. Active weapon is marked."
+        >
+          <span class="weapon-slot" data-weapon-slot="sword"
+            ><kbd class="weapon-kbd">1</kbd> Sword</span
+          >
+          <span class="weapon-slot" data-weapon-slot="shield"
+            ><kbd class="weapon-kbd">2</kbd> Shield</span
+          >
+          <span class="weapon-slot" data-weapon-slot="bow"
+            ><kbd class="weapon-kbd">3</kbd> Bow</span
+          >
+        </div>
+        <p class="hud-current-weapon">
+          Active: <strong data-weapon>sword</strong>
+        </p>
         <div class="hud-combat-meta">
           <span>Gold <strong data-gold>0</strong></span>
-          <span>Weapon <strong data-weapon>sword</strong></span>
         </div>
       </div>
       <div id="hud" class="hud" aria-live="polite">

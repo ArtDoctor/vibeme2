@@ -1,4 +1,5 @@
 mod combat;
+mod mobs;
 mod validate;
 mod world;
 
@@ -27,6 +28,9 @@ use crate::combat::{
     STAMINA_BLOCK_PER_S, STAMINA_BOW_CHARGE_PER_S, STAMINA_BOW_FIRE, STAMINA_MELEE,
     STAMINA_REGEN_PER_S, SWING_COOLDOWN_S,
 };
+use crate::mobs::{
+    mob_arrow_hit, mob_max_hp, spawn_training_dummy, tick_mobs, MobKind, MobPlayerHit,
+};
 use crate::validate::clamp_claimed_position;
 use crate::world::{build_colliders, sample_terrain_height, AabbCollider, EYE_HEIGHT};
 
@@ -48,6 +52,13 @@ struct Hub {
     sessions: HashMap<Uuid, Uuid>,
     arrows: Vec<Arrow>,
     next_arrow_id: u32,
+    mobs: Vec<crate::mobs::Mob>,
+    mob_spawn_timer: f64,
+    next_mob_id: u32,
+    /** Drained into each broadcast snapshot (damage numbers for clients). */
+    damage_floats: Vec<DamageFloatSnapshot>,
+    /** Player ids who died this tick (before respawn); drained into snapshots. */
+    deaths_this_tick: Vec<Uuid>,
 }
 
 struct Player {
@@ -152,12 +163,39 @@ struct ArrowSnapshot {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct MobSnapshot {
+    id: u32,
+    kind: &'static str,
+    max_hp: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+    hp: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DamageFloatSnapshot {
+    source_id: String,
+    x: f64,
+    y: f64,
+    z: f64,
+    amount: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SnapshotOut {
     #[serde(rename = "type")]
     msg_type: &'static str,
     tick: u64,
     players: Vec<PlayerSnapshot>,
     arrows: Vec<ArrowSnapshot>,
+    mobs: Vec<MobSnapshot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    damage_floats: Vec<DamageFloatSnapshot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    deaths: Vec<String>,
 }
 
 fn valid_nickname(raw: &str) -> bool {
@@ -171,6 +209,13 @@ fn valid_nickname(raw: &str) -> bool {
 
 fn spawn_eye_y() -> f64 {
     sample_terrain_height(0.0, 0.0) + EYE_HEIGHT
+}
+
+fn mob_kind_tag(m: &crate::mobs::Mob) -> &'static str {
+    match m.kind {
+        MobKind::Creep => "creep",
+        MobKind::TrainingDummy => "trainingDummy",
+    }
 }
 
 fn respawn_player(p: &mut Player) {
@@ -188,7 +233,7 @@ fn respawn_player(p: &mut Player) {
     p.pitch = 0.0;
 }
 
-fn tick_hub_world(h: &mut Hub, dt: f64) {
+fn tick_hub_world(h: &mut Hub, dt: f64, world_tick: u64, colliders: &[AabbCollider]) {
     let dt = dt.clamp(0.0, 0.12);
     for p in h.players.values_mut() {
         p.stamina = (p.stamina + STAMINA_REGEN_PER_S * dt).min(MAX_STAMINA);
@@ -209,6 +254,38 @@ fn tick_hub_world(h: &mut Hub, dt: f64) {
     process_arrow_hits(h);
 
     h.arrows.retain(|a| a.y > -30.0 && a.x.abs() <= 250.0 && a.z.abs() <= 250.0);
+
+    let poses: Vec<(Uuid, f64, f64, f64)> = h
+        .players
+        .iter()
+        .map(|(id, p)| (*id, p.x, p.y, p.z))
+        .collect();
+    let mob_hits = tick_mobs(
+        &mut h.mobs,
+        &poses,
+        dt,
+        colliders,
+        &mut h.mob_spawn_timer,
+        &mut h.next_mob_id,
+        world_tick,
+    );
+    apply_mob_player_hits(h, mob_hits);
+}
+
+fn apply_mob_player_hits(h: &mut Hub, hits: Vec<MobPlayerHit>) {
+    for hit in hits {
+        let Some(p) = h.players.get_mut(&hit.player) else {
+            continue;
+        };
+        if point_in_spawn_safe_zone(p.x, p.z) {
+            continue;
+        }
+        p.hp = (p.hp - hit.damage).max(0.0);
+        if p.hp <= 0.0 {
+            h.deaths_this_tick.push(hit.player);
+            respawn_player(p);
+        }
+    }
 }
 
 fn resolve_sword_swing(hub: &mut Hub, attacker_id: Uuid) {
@@ -220,16 +297,65 @@ fn resolve_sword_swing(hub: &mut Hub, attacker_id: Uuid) {
         p.weapon == WeaponKind::Sword
             && p.last_swing.elapsed() >= Duration::from_secs_f64(SWING_COOLDOWN_S)
             && p.stamina >= STAMINA_MELEE
-            && !point_in_spawn_safe_zone(p.x, p.z)
     };
     if !can {
         return;
+    }
+
+    let attacker_in_safe = {
+        let p = hub.players.get(&attacker_id).unwrap();
+        point_in_spawn_safe_zone(p.x, p.z)
+    };
+
+    {
+        let p = hub.players.get_mut(&attacker_id).unwrap();
+        p.stamina -= STAMINA_MELEE;
+        p.last_swing = Instant::now();
+        p.swing_visual_s = 0.4;
     }
 
     let (ax, az, ayaw, ay) = {
         let p = hub.players.get(&attacker_id).unwrap();
         (p.x, p.z, p.yaw, p.y)
     };
+
+    let mob_hit_indices: Vec<usize> = hub
+        .mobs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| {
+            if melee_hit_valid(ax, az, ayaw, ay, m.x, m.z, m.y) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for mi in mob_hit_indices {
+        let pos = {
+            let Some(m) = hub.mobs.get_mut(mi) else {
+                continue;
+            };
+            m.hp -= MELEE_DAMAGE;
+            if m.kind == MobKind::TrainingDummy && m.hp <= 0.0 {
+                m.hp = crate::mobs::TRAINING_DUMMY_HP;
+            }
+            (m.x, m.y + 0.35, m.z)
+        };
+        hub.damage_floats.push(DamageFloatSnapshot {
+            source_id: attacker_id.to_string(),
+            x: pos.0,
+            y: pos.1,
+            z: pos.2,
+            amount: MELEE_DAMAGE,
+        });
+    }
+
+    // No PvP melee damage while standing in the spawn safe zone (mobs/dummy still take hits above).
+    if attacker_in_safe {
+        return;
+    }
 
     let victims: Vec<(Uuid, f64)> = hub
         .players
@@ -252,17 +378,24 @@ fn resolve_sword_swing(hub: &mut Hub, attacker_id: Uuid) {
         })
         .collect();
 
-    {
-        let p = hub.players.get_mut(&attacker_id).unwrap();
-        p.stamina -= STAMINA_MELEE;
-        p.last_swing = Instant::now();
-        p.swing_visual_s = 0.4;
-    }
-
     for (oid, dmg) in victims {
+        let pos = hub
+            .players
+            .get(&oid)
+            .map(|t| (t.x, t.y - 0.2, t.z));
+        if let Some((fx, fy, fz)) = pos {
+            hub.damage_floats.push(DamageFloatSnapshot {
+                source_id: attacker_id.to_string(),
+                x: fx,
+                y: fy,
+                z: fz,
+                amount: dmg,
+            });
+        }
         if let Some(t) = hub.players.get_mut(&oid) {
             t.hp = (t.hp - dmg).max(0.0);
             if t.hp <= 0.0 {
+                hub.deaths_this_tick.push(oid);
                 respawn_player(t);
             }
         }
@@ -278,20 +411,20 @@ fn resolve_bow_fire(hub: &mut Hub, attacker_id: Uuid) {
         p.weapon == WeaponKind::Bow
             && p.bow_charge >= BOW_MIN_CHARGE
             && p.stamina >= STAMINA_BOW_FIRE
-            && !point_in_spawn_safe_zone(p.x, p.z)
     };
     if !can {
         return;
     }
 
-    let (x, y, z, yaw, pitch) = {
+    let (x, y, z, yaw, pitch, deals_damage) = {
         let p = hub.players.get(&attacker_id).unwrap();
-        (p.x, p.y, p.z, p.yaw, p.pitch)
+        let deals_damage = !point_in_spawn_safe_zone(p.x, p.z);
+        (p.x, p.y, p.z, p.yaw, p.pitch, deals_damage)
     };
 
     let id = hub.next_arrow_id;
     hub.next_arrow_id = hub.next_arrow_id.wrapping_add(1);
-    let arr = spawn_arrow_from_player(attacker_id, id, x, y, z, yaw, pitch);
+    let arr = spawn_arrow_from_player(attacker_id, id, x, y, z, yaw, pitch, deals_damage);
     hub.arrows.push(arr);
 
     if let Some(p) = hub.players.get_mut(&attacker_id) {
@@ -307,6 +440,37 @@ fn process_arrow_hits(h: &mut Hub) {
         let ay = h.arrows[i].y;
         let az = h.arrows[i].z;
         let heavy = h.arrows[i].heavy;
+        let deals_damage = h.arrows[i].deals_damage;
+
+        let mut mob_hit_idx: Option<usize> = None;
+        for (mi, m) in h.mobs.iter().enumerate() {
+            if mob_arrow_hit(ax, ay, az, m) {
+                let allow = deals_damage || m.kind == MobKind::TrainingDummy;
+                if allow {
+                    mob_hit_idx = Some(mi);
+                }
+                break;
+            }
+        }
+        if let Some(mi) = mob_hit_idx {
+            let pos = {
+                let m = &mut h.mobs[mi];
+                m.hp -= ARROW_DAMAGE;
+                if m.kind == MobKind::TrainingDummy && m.hp <= 0.0 {
+                    m.hp = crate::mobs::TRAINING_DUMMY_HP;
+                }
+                (m.x, m.y + 0.35, m.z)
+            };
+            h.damage_floats.push(DamageFloatSnapshot {
+                source_id: owner.to_string(),
+                x: pos.0,
+                y: pos.1,
+                z: pos.2,
+                amount: ARROW_DAMAGE,
+            });
+            h.arrows.swap_remove(i);
+            continue;
+        }
 
         let mut victim: Option<(Uuid, f64)> = None;
         for (pid, p) in &h.players {
@@ -333,10 +497,23 @@ fn process_arrow_hits(h: &mut Hub) {
         }
 
         if let Some((pid, dmg)) = victim {
-            if let Some(p) = h.players.get_mut(&pid) {
-                p.hp = (p.hp - dmg).max(0.0);
-                if p.hp <= 0.0 {
-                    respawn_player(p);
+            if deals_damage {
+                let pos = h.players.get(&pid).map(|p| (p.x, p.y - 0.2, p.z));
+                if let Some((fx, fy, fz)) = pos {
+                    h.damage_floats.push(DamageFloatSnapshot {
+                        source_id: owner.to_string(),
+                        x: fx,
+                        y: fy,
+                        z: fz,
+                        amount: dmg,
+                    });
+                }
+                if let Some(p) = h.players.get_mut(&pid) {
+                    p.hp = (p.hp - dmg).max(0.0);
+                    if p.hp <= 0.0 {
+                        h.deaths_this_tick.push(pid);
+                        respawn_player(p);
+                    }
                 }
             }
             h.arrows.swap_remove(i);
@@ -354,6 +531,11 @@ impl Hub {
             sessions: HashMap::new(),
             arrows: Vec::new(),
             next_arrow_id: 1,
+            mobs: vec![spawn_training_dummy(1)],
+            mob_spawn_timer: 0.0,
+            next_mob_id: 2,
+            damage_floats: Vec::new(),
+            deaths_this_tick: Vec::new(),
         }
     }
 
@@ -430,7 +612,12 @@ async fn main() {
             interval.tick().await;
             tick = tick.saturating_add(1);
             let mut hub = tick_state.hub.write().await;
-            tick_hub_world(&mut hub, dt);
+            tick_hub_world(&mut hub, dt, tick, tick_state.colliders.as_slice());
+            let damage_floats = std::mem::take(&mut hub.damage_floats);
+            let deaths = std::mem::take(&mut hub.deaths_this_tick)
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>();
             let players: Vec<PlayerSnapshot> = hub
                 .players
                 .iter()
@@ -469,12 +656,28 @@ async fn main() {
                     yaw: a.vx.atan2(a.vz),
                 })
                 .collect();
+            let mobs: Vec<MobSnapshot> = hub
+                .mobs
+                .iter()
+                .map(|m| MobSnapshot {
+                    id: m.id,
+                    kind: mob_kind_tag(m),
+                    max_hp: mob_max_hp(m),
+                    x: m.x,
+                    y: m.y,
+                    z: m.z,
+                    hp: m.hp,
+                })
+                .collect();
             drop(hub);
             let msg = SnapshotOut {
                 msg_type: "snapshot",
                 tick,
                 players,
                 arrows,
+                mobs,
+                damage_floats,
+                deaths,
             };
             if let Ok(json) = serde_json::to_string(&msg) {
                 let _ = tick_state.snapshots.send(json);
@@ -671,8 +874,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 p.z = nz;
                                 p.yaw = yaw;
                                 p.pitch = pitch;
-                                if let Some(w) = weapon.as_deref().and_then(WeaponKind::from_str) {
-                                    p.weapon = w;
+                                match weapon.as_deref() {
+                                    None => {}
+                                    Some(s) => {
+                                        p.weapon = WeaponKind::from_str(s).unwrap_or_default();
+                                    }
                                 }
                                 p.blocking = blocking;
                                 p.bow_charge = bow_charge.clamp(0.0, 1.0);

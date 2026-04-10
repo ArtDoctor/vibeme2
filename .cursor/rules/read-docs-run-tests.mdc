@@ -5,7 +5,4 @@ alwaysApply: true
 
 # Workflow
 
-Follow [`docs/RULES.md`](docs/RULES.md) items **23** and **24**:
-
-- Before changing behavior or structure, read relevant files under `docs/` (at minimum `docs/RULES.md`; also `docs/ARCHITECTURE.md` / `docs/TASKS.md` when applicable).
-- After any code change, run the full test suite and fix failures before stopping: `npm run test` and `cargo test --manifest-path server/Cargo.toml`.
+Follow [`docs/RULES.md`](docs/RULES.md)

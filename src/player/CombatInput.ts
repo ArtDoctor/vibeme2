@@ -1,3 +1,4 @@
+import { BOW_MIN_CHARGE } from "../combat/constants";
 import type { WeaponKind } from "../net/types";
 
 export interface CombatOutbound {
@@ -11,8 +12,9 @@ export interface CombatOutbound {
 const SWING_COOLDOWN_S = 0.45;
 
 /**
- * Keyboard + mouse combat intents for Milestone 2. Only active while pointer is locked.
- * 1/2/3 — weapon. Sword: LMB swing. Shield: hold RMB to block. Bow: hold LMB to charge, release to fire.
+ * Keyboard + mouse combat for Milestone 2.
+ * 1–3 / numpad 1–3 — weapon (works before pointer lock). Sword: LMB swing. Shield: RMB block.
+ * Bow: hold LMB to charge, release to fire (mouse needs pointer lock).
  */
 export class CombatInput {
   weapon: WeaponKind = "sword";
@@ -72,6 +74,16 @@ export class CombatInput {
     };
   }
 
+  /** Blocking state for first-person shield pose (RMB). */
+  getBlocking(): boolean {
+    return this.blocking;
+  }
+
+  /** Current bow draw amount 0–1 for local view animation. */
+  getBowChargeVisual(): number {
+    return this.bowCharge;
+  }
+
   dispose(): void {
     this.domElement.removeEventListener("mousedown", this.onMouseDown);
     this.domElement.removeEventListener("mouseup", this.onMouseUp);
@@ -100,7 +112,7 @@ export class CombatInput {
   private readonly onMouseUp = (e: MouseEvent): void => {
     if (e.button === 0 && this.weapon === "bow" && this.bowCharging) {
       this.bowCharging = false;
-      if (this.bowCharge >= 0.22) {
+      if (this.bowCharge >= BOW_MIN_CHARGE) {
         this.bowShotCharge = this.bowCharge;
         this.firePending = true;
       }
@@ -112,25 +124,36 @@ export class CombatInput {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (this.applyWeaponKeyCode(e.code)) {
+      e.preventDefault();
+      return;
+    }
     if (!this.isPointerLocked()) return;
-    switch (e.code) {
+  };
+
+  /** 1–3 / numpad 1–3 switch weapon without pointer lock (mouse combat still needs lock). */
+  private applyWeaponKeyCode(code: string): boolean {
+    switch (code) {
       case "Digit1":
+      case "Numpad1":
         this.weapon = "sword";
         this.bowCharging = false;
         this.bowCharge = 0;
         this.blocking = false;
-        break;
+        return true;
       case "Digit2":
+      case "Numpad2":
         this.weapon = "shield";
         this.bowCharging = false;
         this.bowCharge = 0;
-        break;
+        return true;
       case "Digit3":
+      case "Numpad3":
         this.weapon = "bow";
         this.blocking = false;
-        break;
+        return true;
       default:
-        break;
+        return false;
     }
-  };
+  }
 }

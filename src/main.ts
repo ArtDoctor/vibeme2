@@ -11,10 +11,14 @@ const gameCanvas: HTMLCanvasElement = canvasEl;
 const hudHint = document.getElementById("hud") ?? undefined;
 const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
 const hudCombat = document.getElementById("hud-combat") ?? undefined;
+const hudCompass = document.getElementById("hud-compass") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
 const joinNickname = document.getElementById("join-nickname");
 const joinSubmit = document.getElementById("join-submit");
 const joinError = document.getElementById("join-error");
+const deathPanel = document.getElementById("death-panel");
+const deathContinue = document.getElementById("death-continue");
+const deathMenu = document.getElementById("death-menu");
 
 let game: Game | undefined;
 
@@ -36,6 +40,21 @@ function hideJoinPanel(): void {
   joinPanel?.classList.add("hidden");
 }
 
+function showJoinPanel(): void {
+  joinPanel?.classList.remove("hidden");
+}
+
+function showDeathPanel(): void {
+  if (deathPanel) {
+    deathPanel.classList.remove("hidden");
+  }
+  document.exitPointerLock();
+}
+
+function hideDeathPanel(): void {
+  deathPanel?.classList.add("hidden");
+}
+
 async function startMultiplayer(): Promise<void> {
   if (!(joinNickname instanceof HTMLInputElement)) return;
   const nickname = joinNickname.value.trim();
@@ -52,7 +71,10 @@ async function startMultiplayer(): Promise<void> {
   try {
     const mp = await MultiplayerClient.connect(
       { nickname, session: stored },
-      (snap) => {
+      (snap, localPlayerId) => {
+        if (snap.deaths?.includes(localPlayerId)) {
+          showDeathPanel();
+        }
         game?.applyRemoteSnapshot(snap);
       },
     );
@@ -62,6 +84,7 @@ async function startMultiplayer(): Promise<void> {
       safeZoneHint,
       hudCombat,
       localPlayerId: mp.id,
+      compassEl: hudCompass,
     });
     game.attachMultiplayer(mp);
     hideJoinPanel();
@@ -87,6 +110,21 @@ if (joinNickname instanceof HTMLInputElement) {
     if (e.key === "Enter") {
       void startMultiplayer();
     }
+  });
+}
+
+if (deathContinue instanceof HTMLButtonElement) {
+  deathContinue.addEventListener("click", () => {
+    hideDeathPanel();
+  });
+}
+
+if (deathMenu instanceof HTMLButtonElement) {
+  deathMenu.addEventListener("click", () => {
+    hideDeathPanel();
+    game?.dispose();
+    game = undefined;
+    showJoinPanel();
   });
 }
 

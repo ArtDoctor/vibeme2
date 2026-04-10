@@ -44,10 +44,36 @@ export interface SnapshotArrow {
   yaw: number;
 }
 
+export type MobKind = "creep" | "trainingDummy";
+
+export interface SnapshotMob {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  kind: MobKind;
+}
+
+export interface DamageFloatEvent {
+  sourceId: string;
+  x: number;
+  y: number;
+  z: number;
+  amount: number;
+}
+
 export interface SnapshotMsg {
   type: "snapshot";
   tick: number;
   players: SnapshotPlayer[];
   /** Omitted by older servers; default to empty. */
   arrows?: SnapshotArrow[];
+  /** Omitted by older servers; default to empty. */
+  mobs: SnapshotMob[];
+  /** Omitted when no damage events this tick. */
+  damageFloats?: DamageFloatEvent[];
+  /** Player ids who died this tick (server respawns immediately; used for UI). */
+  deaths?: readonly string[];
 }

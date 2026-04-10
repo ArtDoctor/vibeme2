@@ -1,7 +1,6 @@
 import {
   BoxGeometry,
   CanvasTexture,
-  ConeGeometry,
   Group,
   Mesh,
   MeshLambertMaterial,
@@ -11,16 +10,107 @@ import {
   SpriteMaterial,
   SRGBColorSpace,
 } from "three";
+import { avatarRotationYFromCombatYaw } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
 import type { SnapshotPlayer, WeaponKind } from "../net/types";
+import { lerpAngle, shortestAngleDelta } from "../utils/math";
+import { animateWeaponGroups, buildWeaponGroupsThirdPerson, setWeaponVisible } from "./weaponModels";
+
+/** Renders this far behind newest sample so two arrivals usually bracket render time. */
+const INTERP_DELAY_MS = 110;
+const MAX_EXTRAPOLATE_MS = 130;
+const MAX_SAMPLES_PER_PLAYER = 32;
+const MAX_SAMPLE_SPAN_MS = 1400;
+const TIME_EPS_MS = 1e-3;
+
+type StateSample = { t: number; p: SnapshotPlayer };
+
+function lerpSnapshotPlayer(
+  a: SnapshotPlayer,
+  b: SnapshotPlayer,
+  t: number,
+): SnapshotPlayer {
+  const u = Math.min(1, Math.max(0, t));
+  const weapon: WeaponKind = u >= 0.5 ? b.weapon : a.weapon;
+  const blocking = u >= 0.5 ? b.blocking : a.blocking;
+  return {
+    id: b.id,
+    nickname: b.nickname,
+    x: a.x + (b.x - a.x) * u,
+    y: a.y + (b.y - a.y) * u,
+    z: a.z + (b.z - a.z) * u,
+    yaw: lerpAngle(a.yaw, b.yaw, u),
+    pitch: lerpAngle(a.pitch, b.pitch, u),
+    hp: a.hp + (b.hp - a.hp) * u,
+    stamina: a.stamina + (b.stamina - a.stamina) * u,
+    gold: a.gold + (b.gold - a.gold) * u,
+    weapon,
+    blocking,
+    bowCharge: a.bowCharge + (b.bowCharge - a.bowCharge) * u,
+    swingT: a.swingT + (b.swingT - a.swingT) * u,
+  };
+}
+
+function extrapolateSnapshot(
+  prev: StateSample,
+  last: StateSample,
+  renderTime: number,
+): SnapshotPlayer {
+  const a = prev.p;
+  const b = last.p;
+  const dt = last.t - prev.t;
+  if (dt < TIME_EPS_MS) {
+    return b;
+  }
+  const extra = renderTime - last.t;
+  const e = Math.min(Math.max(0, extra), MAX_EXTRAPOLATE_MS);
+  const k = e / dt;
+  return {
+    ...b,
+    x: b.x + ((b.x - a.x) / dt) * e,
+    y: b.y + ((b.y - a.y) / dt) * e,
+    z: b.z + ((b.z - a.z) / dt) * e,
+    yaw: b.yaw + shortestAngleDelta(a.yaw, b.yaw) * k,
+    pitch: b.pitch + shortestAngleDelta(a.pitch, b.pitch) * k,
+    hp: b.hp + (b.hp - a.hp) * k,
+    stamina: b.stamina + (b.stamina - a.stamina) * k,
+    gold: Math.round(b.gold + (b.gold - a.gold) * k),
+    bowCharge: b.bowCharge + (b.bowCharge - a.bowCharge) * k,
+    swingT: b.swingT + (b.swingT - a.swingT) * k,
+  };
+}
+
+function resolveInterpolatedPlayer(
+  samples: readonly StateSample[],
+  renderTime: number,
+): SnapshotPlayer | null {
+  if (samples.length === 0) {
+    return null;
+  }
+  const head = samples[0];
+  if (renderTime <= head.t) {
+    return head.p;
+  }
+  let i = 0;
+  while (i < samples.length - 1 && samples[i + 1].t <= renderTime) {
+    i += 1;
+  }
+  const cur = samples[i];
+  if (i === samples.length - 1) {
+    if (samples.length >= 2) {
+      return extrapolateSnapshot(samples[i - 1], cur, renderTime);
+    }
+    return cur.p;
+  }
+  const nxt = samples[i + 1];
+  const span = nxt.t - cur.t;
+  const alpha = span < TIME_EPS_MS ? 1 : (renderTime - cur.t) / span;
+  return lerpSnapshotPlayer(cur.p, nxt.p, alpha);
+}
 
 const TORSO_MAT = new MeshLambertMaterial({ color: 0x4a8c6a });
 const HEAD_MAT = new MeshLambertMaterial({ color: 0xe8c4a0 });
 const LIMB_MAT = new MeshLambertMaterial({ color: 0x3d7358 });
-const STEEL_MAT = new MeshLambertMaterial({ color: 0xb8c4d0 });
-const GRIP_MAT = new MeshLambertMaterial({ color: 0x5c4030 });
-const WOOD_MAT = new MeshLambertMaterial({ color: 0x8b5a2b });
-const STRING_MAT = new MeshLambertMaterial({ color: 0xd8c8a8 });
 
 function makeNicknameSprite(nickname: string): Sprite {
   const canvas = document.createElement("canvas");
@@ -56,59 +146,49 @@ function makeNicknameSprite(nickname: string): Sprite {
   return sprite;
 }
 
-function buildSword(): Group {
-  const g = new Group();
-  const blade = new Mesh(new BoxGeometry(0.07, 0.52, 0.035), STEEL_MAT);
-  blade.position.y = 0.28;
-  const guard = new Mesh(new BoxGeometry(0.32, 0.05, 0.05), STEEL_MAT);
-  guard.position.y = 0.02;
-  g.add(blade);
-  g.add(guard);
-  g.position.set(0.38, 0.75, -0.12);
-  g.rotation.y = -0.35;
-  return g;
+/** Shared box avatar + weapons (remote players and local third-person). */
+export function createPlayerAvatarRig(nickname: string): Group {
+  const root = new Group();
+  const torso = new Mesh(new BoxGeometry(0.52, 0.72, 0.32), TORSO_MAT);
+  torso.position.y = 0.52;
+  const head = new Mesh(new BoxGeometry(0.34, 0.34, 0.34), HEAD_MAT);
+  head.position.y = 1.12;
+  const leftArm = new Mesh(new BoxGeometry(0.14, 0.55, 0.14), LIMB_MAT);
+  leftArm.position.set(-0.38, 0.58, 0);
+  const rightArm = new Mesh(new BoxGeometry(0.14, 0.55, 0.14), LIMB_MAT);
+  rightArm.position.set(0.38, 0.58, 0);
+
+  const { sword, shield, bow } = buildWeaponGroupsThirdPerson();
+  sword.name = "sword";
+  shield.name = "shield";
+  bow.name = "bow";
+
+  root.add(torso);
+  root.add(head);
+  root.add(leftArm);
+  root.add(rightArm);
+  root.add(sword);
+  root.add(shield);
+  root.add(bow);
+  root.add(makeNicknameSprite(nickname));
+  root.scale.setScalar(2);
+  root.userData.sword = sword;
+  root.userData.shield = shield;
+  root.userData.bow = bow;
+  return root;
 }
 
-function buildShield(): Group {
-  const g = new Group();
-  const plate = new Mesh(new BoxGeometry(0.52, 0.72, 0.07), STEEL_MAT);
-  plate.position.y = 0.36;
-  const grip = new Mesh(new BoxGeometry(0.09, 0.18, 0.07), GRIP_MAT);
-  grip.position.set(-0.12, 0.22, 0.06);
-  g.add(plate);
-  g.add(grip);
-  g.position.set(0.42, 0.7, -0.05);
-  g.rotation.y = -0.45;
-  return g;
-}
+export function updatePlayerAvatarRig(g: Group, p: SnapshotPlayer): void {
+  const feetY = p.y - EYE_HEIGHT;
+  g.position.set(p.x, feetY, p.z);
+  g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
 
-function buildBow(): Group {
-  const g = new Group();
-  const tri = new Mesh(
-    new ConeGeometry(0.2, 0.5, 3, 1, false),
-    WOOD_MAT,
-  );
-  tri.rotation.z = Math.PI / 2;
-  tri.rotation.y = Math.PI / 4;
-  tri.position.set(0, 0, 0);
-  const stringMesh = new Mesh(new BoxGeometry(0.02, 0.48, 0.02), STRING_MAT);
-  stringMesh.position.set(0.12, 0, 0);
-  g.add(tri);
-  g.add(stringMesh);
-  g.position.set(0.35, 0.78, -0.1);
-  g.rotation.y = -0.2;
-  return g;
-}
+  const sword = g.userData.sword as Group;
+  const shield = g.userData.shield as Group;
+  const bow = g.userData.bow as Group;
 
-function setWeaponVisible(
-  sword: Group,
-  shield: Group,
-  bow: Group,
-  w: WeaponKind,
-): void {
-  sword.visible = w === "sword";
-  shield.visible = w === "shield";
-  bow.visible = w === "bow";
+  setWeaponVisible(sword, shield, bow, p.weapon);
+  animateWeaponGroups(sword, shield, bow, p);
 }
 
 /**
@@ -118,13 +198,18 @@ export class RemotePlayers {
   private readonly scene: Scene;
   private readonly localId: string;
   private readonly byId = new Map<string, Group>();
+  private readonly samplesById = new Map<string, StateSample[]>();
 
   constructor(scene: Scene, localPlayerId: string) {
     this.scene = scene;
     this.localId = localPlayerId;
   }
 
+  /**
+   * Authoritative poses from the server; stored with receive time for frame interpolation.
+   */
   applySnapshot(players: readonly SnapshotPlayer[]): void {
+    const receiveTime = performance.now();
     const seen = new Set<string>();
     for (const p of players) {
       if (p.id === this.localId) continue;
@@ -135,12 +220,27 @@ export class RemotePlayers {
         this.byId.set(p.id, g);
         this.scene.add(g);
       }
-      this.updateRig(g, p);
+      this.pushSample(p.id, { t: receiveTime, p });
     }
     for (const [id, g] of this.byId) {
       if (!seen.has(id)) {
         this.scene.remove(g);
         this.byId.delete(id);
+        this.samplesById.delete(id);
+      }
+    }
+  }
+
+  /** Call each frame after simulation; smooths remote motion between network snapshots. */
+  update(): void {
+    const renderTime = performance.now() - INTERP_DELAY_MS;
+    for (const [id, g] of this.byId) {
+      const samples = this.samplesById.get(id);
+      const resolved = samples
+        ? resolveInterpolatedPlayer(samples, renderTime)
+        : null;
+      if (resolved) {
+        this.updateRig(g, resolved);
       }
     }
   }
@@ -150,63 +250,30 @@ export class RemotePlayers {
       this.scene.remove(g);
     }
     this.byId.clear();
+    this.samplesById.clear();
+  }
+
+  private pushSample(id: string, sample: StateSample): void {
+    let arr = this.samplesById.get(id);
+    if (!arr) {
+      arr = [];
+      this.samplesById.set(id, arr);
+    }
+    arr.push(sample);
+    while (arr.length > MAX_SAMPLES_PER_PLAYER) {
+      arr.shift();
+    }
+    const newest = arr[arr.length - 1].t;
+    while (arr.length > 2 && newest - arr[0].t > MAX_SAMPLE_SPAN_MS) {
+      arr.shift();
+    }
   }
 
   private createRig(nickname: string): Group {
-    const root = new Group();
-    const torso = new Mesh(new BoxGeometry(0.52, 0.72, 0.32), TORSO_MAT);
-    torso.position.y = 0.52;
-    const head = new Mesh(new BoxGeometry(0.34, 0.34, 0.34), HEAD_MAT);
-    head.position.y = 1.12;
-    const leftArm = new Mesh(new BoxGeometry(0.14, 0.55, 0.14), LIMB_MAT);
-    leftArm.position.set(-0.38, 0.58, 0);
-    const rightArm = new Mesh(new BoxGeometry(0.14, 0.55, 0.14), LIMB_MAT);
-    rightArm.position.set(0.38, 0.58, 0);
-
-    const sword = buildSword();
-    sword.name = "sword";
-    const shield = buildShield();
-    shield.name = "shield";
-    const bow = buildBow();
-    bow.name = "bow";
-
-    root.add(torso);
-    root.add(head);
-    root.add(leftArm);
-    root.add(rightArm);
-    root.add(sword);
-    root.add(shield);
-    root.add(bow);
-    root.add(makeNicknameSprite(nickname));
-    root.userData.sword = sword;
-    root.userData.shield = shield;
-    root.userData.bow = bow;
-    return root;
+    return createPlayerAvatarRig(nickname);
   }
 
   private updateRig(g: Group, p: SnapshotPlayer): void {
-    const feetY = p.y - EYE_HEIGHT;
-    g.position.set(p.x, feetY, p.z);
-    g.rotation.y = p.yaw;
-
-    const sword = g.userData.sword as Group;
-    const shield = g.userData.shield as Group;
-    const bow = g.userData.bow as Group;
-
-    setWeaponVisible(sword, shield, bow, p.weapon);
-
-    const swing = Math.min(1, Math.max(0, p.swingT));
-    sword.rotation.z = -swing * 1.85;
-
-    shield.rotation.x = p.blocking && p.weapon === "shield" ? -0.55 : 0;
-
-    const charge = Math.min(1, Math.max(0, p.bowCharge));
-    const tri = bow.children[0] as Mesh;
-    const str = bow.children[1] as Mesh;
-    if (tri && str) {
-      const s = 0.65 + charge * 0.45;
-      tri.scale.set(s, s, s);
-      str.scale.y = 0.75 + charge * 0.35;
-    }
+    updatePlayerAvatarRig(g, p);
   }
 }

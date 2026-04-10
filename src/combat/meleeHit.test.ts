@@ -28,4 +28,13 @@ describe("isInMeleeArc", () => {
     );
     expect(ok).toBe(false);
   });
+
+  it("misses too far to the side", () => {
+    const eyeY = 2;
+    const ok = isInMeleeArc(
+      { x: 0, z: 0, eyeY, yaw: 0 },
+      { x: 0.55, z: -1, eyeY },
+    );
+    expect(ok).toBe(false);
+  });
 });

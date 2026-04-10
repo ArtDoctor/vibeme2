@@ -1,5 +1,7 @@
 import { Camera, Vector3 } from "three";
+
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
+import { horizontalYawFromCamera } from "../combat/constants";
 import { EYE_HEIGHT, PLAYER_RADIUS } from "../game/constants";
 import type { DesertWorld } from "../scene/DesertScene";
 import type { PlayerState } from "./PlayerState";
@@ -31,6 +33,13 @@ const GROUND_EPSILON = 0.05;
 /** How tall a step we will auto-snap up onto (rocks, low ledges). */
 const MAX_STEP_UP = 0.6;
 
+/** Pull-back distance for third-person view (meters). */
+const THIRD_PERSON_DISTANCE = 3.8;
+/** Offset to the camera's right (over-the-shoulder), world meters. */
+const THIRD_PERSON_SIDE_OFFSET = 0.55;
+/** Slight lift so the camera clears the avatar shoulders. */
+const THIRD_PERSON_Y_BIAS = 0.35;
+
 export interface FirstPersonControlsOptions {
   camera: Camera;
   domElement: HTMLElement;
@@ -54,6 +63,12 @@ export class FirstPersonControls {
   private readonly safeZoneHint?: HTMLElement;
   private readonly move = new Vector3();
   private readonly velocity = new Vector3();
+  /** Eye / capsule top — authoritative for physics and networking (not camera when in third person). */
+  private readonly eyePosition = new Vector3();
+  private readonly scratchFwd = new Vector3();
+  private readonly scratchRight = new Vector3();
+  private readonly scratchUp = new Vector3(0, 1, 0);
+  private thirdPerson = false;
 
   private keyForward = false;
   private keyBackward = false;
@@ -78,7 +93,8 @@ export class FirstPersonControls {
   }
 
   setSpawn(spawn: Vector3): void {
-    this.camera.position.set(spawn.x, spawn.y + EYE_HEIGHT, spawn.z);
+    this.eyePosition.set(spawn.x, spawn.y + EYE_HEIGHT, spawn.z);
+    this.camera.position.copy(this.eyePosition);
     this.velocity.set(0, 0, 0);
     this.state.velocity.x = 0;
     this.state.velocity.y = 0;
@@ -86,10 +102,16 @@ export class FirstPersonControls {
     this.state.onGround = true;
   }
 
+  /** When true, the camera is offset behind the eye for a third-person view. */
+  get isThirdPerson(): boolean {
+    return this.thirdPerson;
+  }
+
   update(delta: number): void {
     if (!this.controls.isLocked) {
       // Still apply gravity so the player settles even before locking.
       this.applyGravityOnly(delta);
+      this.applyCameraView();
       this.updateSafeZoneHint();
       return;
     }
@@ -115,32 +137,32 @@ export class FirstPersonControls {
     this.velocity.y -= GRAVITY * delta;
 
     // ---- Integrate XZ, then resolve obstacle penetration ----
-    this.camera.position.x += this.velocity.x * delta;
-    this.camera.position.z += this.velocity.z * delta;
+    this.eyePosition.x += this.velocity.x * delta;
+    this.eyePosition.z += this.velocity.z * delta;
 
-    const collisionFeetY = this.camera.position.y - EYE_HEIGHT;
+    const collisionFeetY = this.eyePosition.y - EYE_HEIGHT;
     const resolved = iterativelyResolvePlayerXz(
-      this.camera.position.x,
-      this.camera.position.z,
+      this.eyePosition.x,
+      this.eyePosition.z,
       collisionFeetY,
       this.world.colliders,
       { playerRadius: PLAYER_RADIUS, worldHalfSize: this.world.worldHalfSize },
     );
-    this.camera.position.x = resolved.x;
-    this.camera.position.z = resolved.z;
+    this.eyePosition.x = resolved.x;
+    this.eyePosition.z = resolved.z;
 
     // ---- Integrate Y, then snap to ground ----
-    this.camera.position.y += this.velocity.y * delta;
+    this.eyePosition.y += this.velocity.y * delta;
 
     const groundY = this.world.sampleGroundHeight(
-      this.camera.position.x,
-      this.camera.position.z,
+      this.eyePosition.x,
+      this.eyePosition.z,
     );
     const targetEyeY = groundY + EYE_HEIGHT;
-    const feetY = this.camera.position.y - EYE_HEIGHT;
+    const feetY = this.eyePosition.y - EYE_HEIGHT;
 
     if (feetY <= groundY + GROUND_EPSILON && this.velocity.y <= 0) {
-      this.camera.position.y = targetEyeY;
+      this.eyePosition.y = targetEyeY;
       this.velocity.y = 0;
       this.state.onGround = true;
       if (this.jumpRequested) {
@@ -159,6 +181,7 @@ export class FirstPersonControls {
     this.state.velocity.y = this.velocity.y;
     this.state.velocity.z = this.velocity.z;
 
+    this.applyCameraView();
     this.updateSafeZoneHint();
   }
 
@@ -170,9 +193,16 @@ export class FirstPersonControls {
     yaw: number;
     pitch: number;
   } {
-    const p = this.camera.position;
+    const p = this.eyePosition;
     const r = this.camera.rotation;
-    return { x: p.x, y: p.y, z: p.z, yaw: r.y, pitch: r.x };
+    /** Horizontal bearing for combat / net sync; Euler Y alone drifts when pitch ≠ 0 (YXZ order). */
+    return {
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      yaw: horizontalYawFromCamera(this.camera),
+      pitch: r.x,
+    };
   }
 
   dispose(): void {
@@ -186,9 +216,27 @@ export class FirstPersonControls {
 
   // ---------------------------------------------------------------- private
 
+  private applyCameraView(): void {
+    this.camera.position.copy(this.eyePosition);
+    if (!this.thirdPerson) return;
+    this.camera.getWorldDirection(this.scratchFwd);
+    this.camera.position
+      .copy(this.eyePosition)
+      .addScaledVector(this.scratchFwd, -THIRD_PERSON_DISTANCE);
+    this.scratchRight.crossVectors(this.scratchFwd, this.scratchUp);
+    if (this.scratchRight.lengthSq() > 1e-10) {
+      this.scratchRight.normalize();
+      this.camera.position.addScaledVector(
+        this.scratchRight,
+        THIRD_PERSON_SIDE_OFFSET,
+      );
+    }
+    this.camera.position.y += THIRD_PERSON_Y_BIAS;
+  }
+
   private updateSafeZoneHint(): void {
     if (!this.safeZoneHint) return;
-    const { x, z } = this.camera.position;
+    const { x, z } = this.eyePosition;
     const inside = this.world.pointInSpawnSafeZone(x, z);
     this.safeZoneHint.classList.toggle("hidden", !inside);
   }
@@ -197,13 +245,13 @@ export class FirstPersonControls {
     this.velocity.x = 0;
     this.velocity.z = 0;
     this.velocity.y -= GRAVITY * delta;
-    this.camera.position.y += this.velocity.y * delta;
+    this.eyePosition.y += this.velocity.y * delta;
     const groundY = this.world.sampleGroundHeight(
-      this.camera.position.x,
-      this.camera.position.z,
+      this.eyePosition.x,
+      this.eyePosition.z,
     );
-    if (this.camera.position.y - EYE_HEIGHT <= groundY) {
-      this.camera.position.y = groundY + EYE_HEIGHT;
+    if (this.eyePosition.y - EYE_HEIGHT <= groundY) {
+      this.eyePosition.y = groundY + EYE_HEIGHT;
       this.velocity.y = 0;
       this.state.onGround = true;
     }
@@ -215,9 +263,9 @@ export class FirstPersonControls {
    * instead of getting stuck.
    */
   private applyStepUp(groundY: number): void {
-    const feetY = this.camera.position.y - EYE_HEIGHT;
+    const feetY = this.eyePosition.y - EYE_HEIGHT;
     if (feetY < groundY && groundY - feetY <= MAX_STEP_UP) {
-      this.camera.position.y = groundY + EYE_HEIGHT;
+      this.eyePosition.y = groundY + EYE_HEIGHT;
       if (this.velocity.y < 0) this.velocity.y = 0;
       this.state.onGround = true;
     }
@@ -261,6 +309,12 @@ export class FirstPersonControls {
         if (this.controls.isLocked) {
           e.preventDefault();
           this.jumpRequested = true;
+        }
+        break;
+      case "KeyR":
+        if (!e.repeat && this.controls.isLocked) {
+          e.preventDefault();
+          this.thirdPerson = !this.thirdPerson;
         }
         break;
       default:

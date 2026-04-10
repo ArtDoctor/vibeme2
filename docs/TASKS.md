@@ -54,6 +54,10 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
 
 Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / dead`.
 
+- [x] **Training dummy** in spawn (server `MobKind::TrainingDummy`): stationary,
+      high HP pool that resets when depleted; melee and bow can damage it from
+      the safe zone. Client: HP bar + floating damage numbers for local hits.
+
 - [ ] **Small mob** (3–4 boxes, like the player): wanders, aggros at ~10m,
       melees on contact, dies in 2–3 hits, drops a small amount of gold.
 - [ ] **Aggro range and chained aggro**: a mob targets a player only when
@@ -152,5 +156,4 @@ runs; server is authoritative; client keeps only a session token in
 
 - Procedural quest generator
 - Voice chat
-- Mobile / touch controls
 - Cosmetic customization beyond team color
