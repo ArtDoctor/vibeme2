@@ -74,3 +74,10 @@ tests + production build + HTTP smoke). Rust tests: `cargo test --manifest-path 
     and should reference a section in `docs/TASKS.md`.
 22. No third-party physics engine, no ECS framework, no asset pipeline until
     a milestone in `docs/TASKS.md` actually requires it.
+23. **Read `docs/` before you change behavior or structure.** At minimum read this
+    file (`docs/RULES.md`). Read `docs/ARCHITECTURE.md` when touching scene,
+    player, collision, or wiring. Use `docs/TASKS.md` for planned work and
+    backlog context.
+24. **Run the full test suite after any code change** (before you stop): `npm run test`
+    and `cargo test --manifest-path server/Cargo.toml`. Fix failures before
+    moving on.

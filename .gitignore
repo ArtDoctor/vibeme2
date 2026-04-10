@@ -34,3 +34,6 @@ Desktop.ini
 # Test / coverage
 coverage/
 .vitest/
+playwright-report/
+test-results/
+playwright/.cache/

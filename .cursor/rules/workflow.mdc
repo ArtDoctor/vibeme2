@@ -1,0 +1,28 @@
+---
+description: Read docs before changes; run full test suite after code changes
+alwaysApply: true
+---
+
+# Documentation and testing
+
+## Read documentation first
+
+Before implementing features, fixing bugs, or changing behavior, read what applies to the work:
+
+- Project docs: `README`, files under `docs/` if present, and comments or module-level notes tied to the code you touch.
+- When using or upgrading a library, API, or framework, consult its official documentation (or the version pinned in the repo) for correct usage and breaking changes.
+
+Do not rely on guesswork when documented behavior exists.
+
+## Run all tests after changes
+
+After any code change, run the full automated test suite from the repository root and fix failures before finishing the task:
+
+1. `npm test` — unit/integration (Vitest).
+2. `npm run test:e2e` — Playwright end-to-end tests.
+
+If you change Rust code under `server/`, also run:
+
+`cargo test --manifest-path server/Cargo.toml`
+
+Treat a task as incomplete until these commands succeed (unless the user explicitly limits scope, e.g. doc-only edits with no code).

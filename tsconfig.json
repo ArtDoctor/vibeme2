@@ -17,5 +17,5 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src"]
+  "include": ["src", "e2e", "playwright.config.ts"]
 }

@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "smoke:ci": "node scripts/smoke-ci.mjs",
     "server": "cargo run --manifest-path server/Cargo.toml"
   },
@@ -16,7 +18,10 @@
     "three": "^0.172.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
     "@types/three": "^0.183.1",
+    "tree-kill": "^1.2.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.3",
     "vitest": "^3.0.5"
