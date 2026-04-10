@@ -13,7 +13,7 @@ Architecture and collision-model limits are documented in
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173 — run the Rust server separately for /ws
+npm run dev          # Rust on :8080 + Vite on :5173 (Vite proxies /ws → server)
 npm run test         # Vitest (unit tests)
 npm run build        # tsc + vite build
 npm run smoke:ci     # test + build + vite preview + GET / smoke test

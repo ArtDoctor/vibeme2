@@ -1,6 +1,6 @@
 /**
- * Start game server (8080) then Vite dev (5173) for Playwright.
- * Order matters: Vite proxies /ws to 127.0.0.1:8080.
+ * Start Rust game server (8080) then Vite dev (5173).
+ * Used by `npm run dev` and Playwright. Order matters: Vite proxies /ws to 127.0.0.1:8080.
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -61,7 +61,7 @@ const viteProc = spawn(
 
 viteProc.on("exit", (code, signal) => {
   if (code !== 0 && code !== null) {
-    console.error("e2e-serve: Vite exited", code, signal);
+    console.error("dev stack: Vite exited", code, signal);
   }
 });
 
