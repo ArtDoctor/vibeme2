@@ -23,9 +23,11 @@ use crate::mobs::{
     spawn_boss_tank, spawn_training_dummy, tick_mobs, BossArrowPlan, Mob, MobEngagement, MobKind,
     MobPlayerHit, TRAINING_DUMMY_HP,
 };
+use crate::team::Team;
 use crate::validate::clamp_claimed_position;
 use crate::world::{
-    sample_terrain_height, safe_zone_shop_spot_xz, AabbCollider, EYE_HEIGHT,
+    is_team_war_camp_zone_index, safe_zone_index_at, sample_terrain_height, safe_zone_shop_spot_xz,
+    AabbCollider, EYE_HEIGHT, SPAWN_SAFE_ZONES,
 };
 
 const PLAYER_VISIBILITY_RADIUS: f64 = 65.0;
@@ -47,7 +49,7 @@ struct ShopOffer {
     needs_boss: bool,
 }
 
-/// Traveler stalls: spawn, north edge, south edge — iron tier and essentials only.
+/// Traveler stalls: center (0), red north (1), blue south (6), neutral east (7) — iron tier and essentials only.
 const SHOP_OFFERS_BASIC: &[ShopOffer] = &[
     ShopOffer {
         sku: "ironSword",
@@ -217,6 +219,7 @@ pub struct InputCommand {
 
 struct Player {
     nickname: String,
+    team: Team,
     x: f64,
     y: f64,
     z: f64,
@@ -292,6 +295,7 @@ struct PlayerSnapshot {
     bow_charge: f64,
     swing_t: f64,
     boss_unlock: bool,
+    team: Team,
 }
 
 #[derive(Clone, Serialize)]
@@ -395,8 +399,38 @@ pub fn valid_nickname(raw: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn spawn_eye_y() -> f64 {
-    sample_terrain_height(0.0, 0.0) + EYE_HEIGHT
+fn assign_join_team(existing: &HashMap<Uuid, Player>) -> Team {
+    let mut r = 0_u32;
+    let mut b = 0_u32;
+    let mut n = 0_u32;
+    for p in existing.values() {
+        match p.team {
+            Team::Red => r += 1,
+            Team::Blue => b += 1,
+            Team::Neutral => n += 1,
+        }
+    }
+    let m = r.min(b).min(n);
+    if r == m {
+        Team::Red
+    } else if b == m {
+        Team::Blue
+    } else {
+        Team::Neutral
+    }
+}
+
+fn spawn_pose_for_team(team: Team) -> (f64, f64, f64) {
+    let idx = match team {
+        Team::Red => crate::world::TEAM_RED_SAFE_ZONE_INDEX,
+        Team::Blue => crate::world::TEAM_BLUE_SAFE_ZONE_INDEX,
+        Team::Neutral => crate::world::TEAM_NEUTRAL_SAFE_ZONE_INDEX,
+    };
+    let (min_x, max_x, min_z, max_z) = SPAWN_SAFE_ZONES[idx];
+    let cx = (min_x + max_x) / 2.0;
+    let cz = (min_z + max_z) / 2.0;
+    let y = sample_terrain_height(cx, cz) + EYE_HEIGHT;
+    (cx, y, cz)
 }
 
 fn active_weapon_from_main_hand(kind: MainHandKind) -> WeaponKind {
@@ -445,12 +479,14 @@ fn pickup_slot_position(kind: PickupKind, slot: u32) -> (f64, f64) {
 }
 
 impl Player {
-    fn new(nickname: String, session: Uuid) -> Self {
+    fn new(nickname: String, session: Uuid, team: Team) -> Self {
+        let (x, y, z) = spawn_pose_for_team(team);
         Self {
             nickname,
-            x: 0.0,
-            y: spawn_eye_y(),
-            z: 0.0,
+            team,
+            x,
+            y,
+            z,
             yaw: 0.0,
             pitch: 0.0,
             session,
@@ -477,9 +513,10 @@ impl Player {
         self.bow_charge = 0.0;
         self.swing_cooldown_s = 0.0;
         self.swing_visual_s = 0.0;
-        self.x = 0.0;
-        self.z = 0.0;
-        self.y = spawn_eye_y();
+        let (x, y, z) = spawn_pose_for_team(self.team);
+        self.x = x;
+        self.y = y;
+        self.z = z;
         self.yaw = 0.0;
         self.pitch = 0.0;
     }
@@ -728,7 +765,7 @@ impl Simulation {
 
     /// Returns a new player id and session token for a successful join.
     /// Limits: nick uniqueness is only enforced for players connected to this process.
-    pub fn join_player(&mut self, nickname: String) -> Result<(Uuid, Uuid), String> {
+    pub fn join_player(&mut self, nickname: String) -> Result<(Uuid, Uuid, Team), String> {
         let key = nickname.to_lowercase();
         if self.nick_to_id.contains_key(&key) {
             return Err("That nickname is already in use.".to_string());
@@ -736,10 +773,56 @@ impl Simulation {
 
         let id = Uuid::new_v4();
         let session = Uuid::new_v4();
-        self.players.insert(id, Player::new(nickname.clone(), session));
+        let team = assign_join_team(&self.players);
+        self.players.insert(id, Player::new(nickname.clone(), session, team));
         self.nick_to_id.insert(key, id);
         self.sessions.insert(session, id);
-        Ok((id, session))
+        Ok((id, session, team))
+    }
+
+    /// Returns the persistent team for a connected player (reconnect / welcome payload).
+    pub fn player_team(&self, id: Uuid) -> Option<Team> {
+        self.players.get(&id).map(|p| p.team)
+    }
+
+    fn position_in_mixed_team_truce(&self, x: f64, z: f64) -> bool {
+        let idx = match safe_zone_index_at(x, z) {
+            Some(i) => i,
+            None => return false,
+        };
+        if is_team_war_camp_zone_index(idx) {
+            return false;
+        }
+        let mut seen = HashSet::new();
+        for p in self.players.values() {
+            if safe_zone_index_at(p.x, p.z) == Some(idx) {
+                seen.insert(p.team);
+            }
+        }
+        seen.len() >= 2
+    }
+
+    fn players_may_damage_each_other_in_pvp(&self, attacker_id: Uuid, victim_id: Uuid) -> bool {
+        let attacker = match self.players.get(&attacker_id) {
+            Some(p) => p,
+            None => return false,
+        };
+        let victim = match self.players.get(&victim_id) {
+            Some(p) => p,
+            None => return false,
+        };
+        if attacker.team == Team::Neutral {
+            return false;
+        }
+        if attacker.team.is_same_side(victim.team) {
+            return false;
+        }
+        if self.position_in_mixed_team_truce(attacker.x, attacker.z)
+            || self.position_in_mixed_team_truce(victim.x, victim.z)
+        {
+            return false;
+        }
+        true
     }
 
     /// Returns the player id for a reconnect session token.
@@ -821,6 +904,7 @@ impl Simulation {
         }
         let pay = unit.saturating_mul(u32::from(removed));
         player.gold = player.gold.saturating_add(pay);
+        player.apply_desired_loadout(None, None);
         Ok(())
     }
 
@@ -1009,6 +1093,7 @@ impl Simulation {
                     bow_charge: player.bow_charge,
                     swing_t,
                     boss_unlock: player.boss_unlock,
+                    team: player.team,
                 }
             })
             .collect::<Vec<_>>();
@@ -1356,14 +1441,6 @@ impl Simulation {
             melee_damage_for_main_hand(player.equipment.main_hand)
         };
 
-        let attacker_in_safe = {
-            let player = self
-                .players
-                .get(&attacker_id)
-                .expect("player checked above");
-            point_in_spawn_safe_zone(player.x, player.z)
-        };
-
         {
             let player = self
                 .players
@@ -1435,10 +1512,6 @@ impl Simulation {
             }
         }
 
-        if attacker_in_safe {
-            return;
-        }
-
         let victims = self
             .players
             .iter()
@@ -1446,7 +1519,7 @@ impl Simulation {
                 if *other_id == attacker_id {
                     return None;
                 }
-                if point_in_spawn_safe_zone(other.x, other.z) {
+                if !self.players_may_damage_each_other_in_pvp(attacker_id, *other_id) {
                     return None;
                 }
                 if !melee_hit_valid(ax, az, ayaw, ay, other.x, other.z, other.y) {
@@ -1513,26 +1586,17 @@ impl Simulation {
             return;
         }
 
-        let (x, y, z, yaw, pitch, deals_damage) = {
+        let (x, y, z, yaw, pitch) = {
             let player = self
                 .players
                 .get(&attacker_id)
                 .expect("player checked above");
-            let deals_damage = !point_in_spawn_safe_zone(player.x, player.z);
-            (
-                player.x,
-                player.y,
-                player.z,
-                player.yaw,
-                player.pitch,
-                deals_damage,
-            )
+            (player.x, player.y, player.z, player.yaw, player.pitch)
         };
 
         let arrow_id = self.next_arrow_id;
         self.next_arrow_id = self.next_arrow_id.wrapping_add(1);
-        let arrow =
-            spawn_arrow_from_player(attacker_id, arrow_id, x, y, z, yaw, pitch, deals_damage);
+        let arrow = spawn_arrow_from_player(attacker_id, arrow_id, x, y, z, yaw, pitch);
         self.arrows.push(arrow);
 
         if let Some(player) = self.players.get_mut(&attacker_id) {
@@ -1549,15 +1613,11 @@ impl Simulation {
             let ay = self.arrows[index].y;
             let az = self.arrows[index].z;
             let heavy = self.arrows[index].heavy;
-            let deals_damage = self.arrows[index].deals_damage;
 
             let mut mob_hit_index = None;
             for (mob_index, mob) in self.mobs.iter().enumerate() {
                 if mob_arrow_hit(ax, ay, az, mob) {
-                    let allow = deals_damage || mob.kind == MobKind::TrainingDummy;
-                    if allow {
-                        mob_hit_index = Some(mob_index);
-                    }
+                    mob_hit_index = Some(mob_index);
                     break;
                 }
             }
@@ -1615,55 +1675,58 @@ impl Simulation {
                 if *player_id == owner {
                     continue;
                 }
-                if point_in_spawn_safe_zone(player.x, player.z) {
+                if !arrow_hits_player(ax, ay, az, player.x, player.y, player.z) {
                     continue;
                 }
-                if arrow_hits_player(ax, ay, az, player.x, player.y, player.z) {
-                    let vx = ax - player.x;
-                    let vz = az - player.z;
-                    let frontal = frontal_dot(player.yaw, vx, vz);
-                    let damage = damage_after_armor(
-                        damage_after_shield_ranged(
-                            ARROW_DAMAGE,
-                            heavy,
-                            player.blocking,
-                            player.equipment.off_hand == Some(OffHandKind::BasicShield)
-                                && player.equipment.main_hand.is_sword(),
-                            frontal,
-                        ),
-                        player.equipment.armor,
-                    );
-                    victim = Some((*player_id, damage));
-                    break;
+                if owner != Uuid::nil() {
+                    if !self.players_may_damage_each_other_in_pvp(owner, *player_id) {
+                        continue;
+                    }
+                } else if point_in_spawn_safe_zone(player.x, player.z) {
+                    continue;
                 }
+                let vx = ax - player.x;
+                let vz = az - player.z;
+                let frontal = frontal_dot(player.yaw, vx, vz);
+                let damage = damage_after_armor(
+                    damage_after_shield_ranged(
+                        ARROW_DAMAGE,
+                        heavy,
+                        player.blocking,
+                        player.equipment.off_hand == Some(OffHandKind::BasicShield)
+                            && player.equipment.main_hand.is_sword(),
+                        frontal,
+                    ),
+                    player.equipment.armor,
+                );
+                victim = Some((*player_id, damage));
+                break;
             }
 
             if let Some((player_id, damage)) = victim {
-                if deals_damage {
-                    let pos = self
-                        .players
-                        .get(&player_id)
-                        .map(|player| (player.x, player.y - 0.2, player.z));
-                    if let Some((x, y, z)) = pos {
-                        self.damage_floats.push(DamageFloatSnapshot {
-                            source_id: owner.to_string(),
-                            x,
-                            y,
-                            z,
-                            amount: damage,
-                        });
-                    }
-                    let dead = self
-                        .players
-                        .get(&player_id)
-                        .map(|p| (p.hp - damage).max(0.0) <= 0.0)
-                        .unwrap_or(false);
-                    if let Some(player) = self.players.get_mut(&player_id) {
-                        player.hp = (player.hp - damage).max(0.0);
-                    }
-                    if dead {
-                        self.kill_player_with_loot(player_id);
-                    }
+                let pos = self
+                    .players
+                    .get(&player_id)
+                    .map(|player| (player.x, player.y - 0.2, player.z));
+                if let Some((x, y, z)) = pos {
+                    self.damage_floats.push(DamageFloatSnapshot {
+                        source_id: owner.to_string(),
+                        x,
+                        y,
+                        z,
+                        amount: damage,
+                    });
+                }
+                let dead = self
+                    .players
+                    .get(&player_id)
+                    .map(|p| (p.hp - damage).max(0.0) <= 0.0)
+                    .unwrap_or(false);
+                if let Some(player) = self.players.get_mut(&player_id) {
+                    player.hp = (player.hp - damage).max(0.0);
+                }
+                if dead {
+                    self.kill_player_with_loot(player_id);
                 }
                 self.arrows.swap_remove(index);
                 continue;
@@ -1720,7 +1783,7 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         {
             let player = sim.players.get_mut(&player_id).expect("player exists");
             player.x = 12.0;
@@ -1770,11 +1833,11 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (viewer_id, _) = sim
+        let (viewer_id, _, _) = sim
             .join_player("viewer".to_string())
             .expect("join succeeds");
-        let (near_id, _) = sim.join_player("near".to_string()).expect("join succeeds");
-        let (far_id, _) = sim.join_player("far".to_string()).expect("join succeeds");
+        let (near_id, _, _) = sim.join_player("near".to_string()).expect("join succeeds");
+        let (far_id, _, _) = sim.join_player("far".to_string()).expect("join succeeds");
 
         {
             let viewer = sim.players.get_mut(&viewer_id).expect("viewer exists");
@@ -1807,7 +1870,6 @@ mod tests {
             vy: 0.0,
             vz: 1.0,
             heavy: false,
-            deals_damage: true,
         });
         sim.arrows.push(Arrow {
             id: 22,
@@ -1819,7 +1881,6 @@ mod tests {
             vy: 0.0,
             vz: 1.0,
             heavy: false,
-            deals_damage: true,
         });
         sim.damage_floats.push(DamageFloatSnapshot {
             source_id: viewer_id.to_string(),
@@ -1876,7 +1937,7 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         let player = sim.players.get_mut(&player_id).expect("player exists");
         player.gold = 88;
         player.inventory.add(InventoryItemKind::BasicShield, 1);
@@ -1977,10 +2038,10 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         let input = InputCommand {
             x: 0.0,
-            y: spawn_eye_y(),
+            y: sample_terrain_height(0.0, 0.0) + EYE_HEIGHT,
             z: 0.0,
             yaw: 0.0,
             pitch: 0.0,
@@ -2010,10 +2071,10 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (attacker_id, _) = sim
+        let (attacker_id, _, _) = sim
             .join_player("attacker".to_string())
             .expect("join succeeds");
-        let (victim_id, _) = sim.join_player("victim".to_string()).expect("join succeeds");
+        let (victim_id, _, _) = sim.join_player("victim".to_string()).expect("join succeeds");
 
         {
             let attacker = sim.players.get_mut(&attacker_id).expect("attacker exists");

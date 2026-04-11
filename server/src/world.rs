@@ -14,7 +14,7 @@ pub const BOSS_TANK_Z: f64 = 175.0;
 pub const BOSS_SUMMONER_X: f64 = 165.0;
 pub const BOSS_SUMMONER_Z: f64 = -170.0;
 
-pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 7] = {
+pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 8] = {
     let h = SPAWN_SAFE_ZONE_HALF;
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
     [
@@ -25,8 +25,33 @@ pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 7] = {
         (-e - h, -e + h, -e - h, -e + h),
         (e - h, e + h, -e - h, -e + h),
         (-h, h, -e - h, -e + h),
+        (e - h, e + h, -h, h),
     ]
 };
+
+/// North edge safe zone — red team spawn / war camp (matches `TEAM_RED_SAFE_ZONE_INDEX` on the client).
+pub const TEAM_RED_SAFE_ZONE_INDEX: usize = 1;
+/// South edge safe zone — blue team spawn / war camp.
+pub const TEAM_BLUE_SAFE_ZONE_INDEX: usize = 6;
+/// East edge safe zone — neutral team spawn / mixed-team truce when rules apply.
+pub const TEAM_NEUTRAL_SAFE_ZONE_INDEX: usize = 7;
+
+#[inline]
+pub fn safe_zone_index_at(x: f64, z: f64) -> Option<usize> {
+    SPAWN_SAFE_ZONES
+        .iter()
+        .enumerate()
+        .find(|(_, &(min_x, max_x, min_z, max_z))| {
+            x >= min_x && x <= max_x && z >= min_z && z <= max_z
+        })
+        .map(|(i, _)| i)
+}
+
+/// Red/blue home courtyards — PvP allowed between enemies here (not a mixed-team truce yard).
+#[inline]
+pub fn is_team_war_camp_zone_index(idx: usize) -> bool {
+    matches!(idx, i if i == TEAM_RED_SAFE_ZONE_INDEX || i == TEAM_BLUE_SAFE_ZONE_INDEX)
+}
 
 /// Offset from courtyard center toward the map edge — matches `SHOP_SERVICE_SPOT_OFFSET` in `shops.ts`.
 const SHOP_SERVICE_SPOT_OFFSET: f64 = 1.85;
@@ -54,6 +79,7 @@ pub fn safe_zone_shop_spot_xz(shop_index: usize) -> Option<(f64, f64)> {
         4 => (-e, -e),
         5 => (e, -e),
         6 => (0.0, -e),
+        7 => (e, 0.0),
         _ => return None,
     };
     Some(shop_service_spot(cx, cz))
@@ -165,6 +191,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
     add_spawn_castle(&mut colliders, out_e, out_e);
     add_spawn_castle(&mut colliders, -out_e, -out_e);
     add_spawn_castle(&mut colliders, out_e, -out_e);
+    add_spawn_castle(&mut colliders, out_e, 0.0);
     add_shop_stall_colliders(&mut colliders);
     colliders
 }
@@ -243,6 +270,7 @@ fn add_shop_stall_colliders(colliders: &mut Vec<AabbCollider>) {
         (-e, -e),
         (e, -e),
         (0.0_f64, -e),
+        (e, 0.0_f64),
     ];
     for &(cx, cz) in &centers {
         let (fx, fz) = stall_fwd_from_center(cx, cz);
@@ -262,7 +290,7 @@ fn near_any_safe_zone_castle(x: f64, z: f64, radius: f64) -> bool {
         return true;
     }
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
-    for &(cx, cz) in &[(0.0, e), (0.0, -e), (-e, e), (e, e), (-e, -e), (e, -e)] {
+    for &(cx, cz) in &[(0.0, e), (0.0, -e), (e, 0.0), (-e, e), (e, e), (-e, -e), (e, -e)] {
         let dx = x - cx;
         let dz = z - cz;
         if (dx * dx + dz * dz).sqrt() < radius {
@@ -443,5 +471,17 @@ mod tests {
     #[test]
     fn colliders_non_empty() {
         assert!(build_colliders().len() > 220);
+    }
+
+    #[test]
+    fn safe_zone_index_matches_layout() {
+        let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+        assert_eq!(safe_zone_index_at(0.0, 0.0), Some(0));
+        assert_eq!(safe_zone_index_at(e, 0.0), Some(TEAM_NEUTRAL_SAFE_ZONE_INDEX));
+        assert_eq!(safe_zone_index_at(0.0, e), Some(TEAM_RED_SAFE_ZONE_INDEX));
+        assert!(is_team_war_camp_zone_index(TEAM_RED_SAFE_ZONE_INDEX));
+        assert!(is_team_war_camp_zone_index(TEAM_BLUE_SAFE_ZONE_INDEX));
+        assert!(!is_team_war_camp_zone_index(0));
+        assert!(!is_team_war_camp_zone_index(TEAM_NEUTRAL_SAFE_ZONE_INDEX));
     }
 }

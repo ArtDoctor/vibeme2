@@ -17,7 +17,11 @@ import { WorldArrows } from "./WorldArrows";
 import { WorldMobs } from "./WorldMobs";
 import { CompassHud } from "./CompassHud";
 import { WorldPickups } from "./WorldPickups";
-import { nearestShopIndex, shopCatalogForSafeZoneIndex } from "../world/shops";
+import {
+  nearestShopIndex,
+  SHOP_SELL_OFFERS,
+  shopCatalogForSafeZoneIndex,
+} from "../world/shops";
 import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
 
 /**
@@ -390,6 +394,43 @@ export class Game {
       li.appendChild(left);
       li.appendChild(btn);
       list.appendChild(li);
+    }
+
+    const sellList = this.shopPanel.querySelector("[data-shop-sell-list]");
+    if (!(sellList instanceof HTMLUListElement)) return;
+    sellList.replaceChildren();
+    for (const row of SHOP_SELL_OFFERS) {
+      const n = inventoryCount(me.inventory, row.kind);
+      if (n <= 0 || row.unitGold <= 0) continue;
+      const li = document.createElement("li");
+      li.classList.add("shop-sell-row");
+      const left = document.createElement("span");
+      left.textContent = `${row.label} ×${n} — ${row.unitGold}g ea`;
+      const actions = document.createElement("span");
+      actions.className = "shop-sell-actions";
+      const b1 = document.createElement("button");
+      b1.type = "button";
+      b1.textContent = "Sell 1";
+      b1.addEventListener("click", () => {
+        this.multiplayer?.sendShopSell(shopIndex, row.kind, 1);
+      });
+      const bAll = document.createElement("button");
+      bAll.type = "button";
+      bAll.textContent = "Sell all";
+      bAll.addEventListener("click", () => {
+        this.multiplayer?.sendShopSell(shopIndex, row.kind, n);
+      });
+      actions.appendChild(b1);
+      actions.appendChild(bAll);
+      li.appendChild(left);
+      li.appendChild(actions);
+      sellList.appendChild(li);
+    }
+    if (sellList.children.length === 0) {
+      const empty = document.createElement("li");
+      empty.classList.add("shop-sell-empty");
+      empty.textContent = "Nothing to sell (starter wooden sword has no resale value).";
+      sellList.appendChild(empty);
     }
   }
 

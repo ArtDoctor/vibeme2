@@ -5,7 +5,7 @@ import { safeZoneCenterXZ, isAdvancedShopSafeZoneIndex } from "./spawnSafeZone";
  */
 export const SHOP_INTERACT_RADIUS = 3.85;
 
-export const SHOP_SAFE_ZONE_COUNT = 7;
+export const SHOP_SAFE_ZONE_COUNT = 8;
 
 /** Distance from safe-zone center toward the map edge — counter / interaction spot (not courtyard middle). */
 export const SHOP_SERVICE_SPOT_OFFSET = 1.85;
@@ -45,7 +45,7 @@ export interface ShopOfferClient {
   readonly needsBoss: boolean;
 }
 
-/** Traveler stalls: spawn (0), north (1), south (6) — iron tier + essentials. */
+/** Traveler stalls: center (0), red north (1), blue south (6), neutral east (7) — iron tier + essentials. */
 export const SHOP_CATALOG_BASIC: readonly ShopOfferClient[] = [
   { sku: "ironSword", label: "Iron sword", price: 42, needsBoss: false },
   { sku: "basicShield", label: "Shield", price: 32, needsBoss: false },
@@ -74,6 +74,25 @@ export function shopCatalogForSafeZoneIndex(
     ? SHOP_CATALOG_ADVANCED
     : SHOP_CATALOG_BASIC;
 }
+
+/** Sell prices per unit — must match `sell_price_gold` in `server/src/items.rs`. */
+export interface ShopSellOfferClient {
+  readonly kind: string;
+  readonly label: string;
+  readonly unitGold: number;
+}
+
+export const SHOP_SELL_OFFERS: readonly ShopSellOfferClient[] = [
+  { kind: "ironSword", label: "Iron sword", unitGold: 16 },
+  { kind: "steelSword", label: "Steel sword", unitGold: 38 },
+  { kind: "vanguardSword", label: "Vanguard sword", unitGold: 72 },
+  { kind: "basicShield", label: "Shield", unitGold: 12 },
+  { kind: "shortBow", label: "Short bow", unitGold: 20 },
+  { kind: "scoutHelm", label: "Scout helm", unitGold: 7 },
+  { kind: "scoutChest", label: "Scout chest", unitGold: 10 },
+  { kind: "scoutLegs", label: "Scout legs", unitGold: 8 },
+  { kind: "gearUpgradeToken", label: "Gear token", unitGold: 35 },
+];
 
 export function nearestShopIndex(
   x: number,

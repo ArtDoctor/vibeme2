@@ -156,8 +156,6 @@ pub struct Arrow {
     pub vz: f64,
     /// When true, shield frontal blocks completely (boss heavy shot).
     pub heavy: bool,
-    /// When false, arrow still flies but does not apply HP damage (fired from spawn safe zone).
-    pub deals_damage: bool,
 }
 
 pub fn integrate_arrow(a: &mut Arrow, dt: f64) {
@@ -221,7 +219,6 @@ pub fn spawn_boss_projectile(
         vy,
         vz,
         heavy,
-        deals_damage: true,
     }
 }
 
@@ -233,7 +230,6 @@ pub fn spawn_arrow_from_player(
     z: f64,
     yaw: f64,
     pitch: f64,
-    deals_damage: bool,
 ) -> Arrow {
     let (fx, fz) = forward_from_yaw(yaw);
     let c = pitch.cos();
@@ -256,7 +252,6 @@ pub fn spawn_arrow_from_player(
         vy,
         vz,
         heavy: false,
-        deals_damage,
     }
 }
 

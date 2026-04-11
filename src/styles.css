@@ -850,14 +850,40 @@ body {
   font-weight: 700;
 }
 
+.shop-section-title {
+  margin: 10px 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--cream-muted);
+}
+
+.shop-section-title:first-of-type {
+  margin-top: 0;
+}
+
+.shop-sell-hint {
+  margin: 0 0 8px !important;
+  font-size: 0.78rem !important;
+}
+
 .shop-list {
   list-style: none;
   margin: 0 0 14px;
   padding: 0;
-  max-height: min(46vh, 340px);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--gold-dark) transparent;
+}
+
+.shop-list--buy {
+  max-height: min(32vh, 280px);
+}
+
+.shop-list--sell {
+  max-height: min(26vh, 220px);
+  margin-bottom: 12px;
 }
 
 .shop-list::-webkit-scrollbar {
@@ -886,6 +912,24 @@ body {
 
 .shop-list li:last-child {
   border-bottom: none;
+}
+
+.shop-sell-row {
+  flex-wrap: wrap;
+}
+
+.shop-sell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.shop-sell-empty {
+  justify-content: flex-start !important;
+  font-size: 0.82rem !important;
+  color: var(--cream-muted) !important;
+  font-style: italic;
 }
 
 .shop-list button {

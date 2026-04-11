@@ -1,7 +1,8 @@
 /**
- * PvP-safe courtyards — Milestone 1.5 (`docs/TASKS.md`).
- * Server must use these AABBs before applying PvP damage, mob aggro, or spawning mobs
- * inside a courtyard. Client uses them only for UI and matching visuals.
+ * PvP-safe courtyards — Milestones 1.5 & 5 (`docs/TASKS.md`).
+ * Layout: **center** (0), **north/south/east** edge mids (1, 6, 7), **four corners** (2–5).
+ * Server: same AABBs for mob aggro/spawn exclusion; PvP uses team + truce rules in `sim.rs`.
+ * Client: UI, shops, and visuals (flags).
  */
 
 import { TERRAIN_HALF_SIZE } from "../scene/terrain";
@@ -15,7 +16,14 @@ export const SPAWN_SAFE_ZONE_HALF = 5;
 const H = SPAWN_SAFE_ZONE_HALF;
 const E = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
 
-/** All safe zones: spawn castle, north and south edges, and four corners (matches `SPAWN_SAFE_ZONES` in `server/src/world.rs`). */
+/** Red team — north edge courtyard (`server/src/world.rs` `TEAM_RED_SAFE_ZONE_INDEX`). */
+export const TEAM_RED_SAFE_ZONE_INDEX = 1;
+/** Blue team — south edge courtyard. */
+export const TEAM_BLUE_SAFE_ZONE_INDEX = 6;
+/** Neutral team — east edge courtyard (last index; matches server `TEAM_NEUTRAL_SAFE_ZONE_INDEX`). */
+export const TEAM_NEUTRAL_SAFE_ZONE_INDEX = 7;
+
+/** All safe zones: center, north/south edges, four corners, east (matches `SPAWN_SAFE_ZONES` in `server/src/world.rs`). */
 export const ALL_SPAWN_SAFE_ZONE_AABBS = [
   { minX: -H, maxX: H, minZ: -H, maxZ: H },
   { minX: -H, maxX: H, minZ: E - H, maxZ: E + H },
@@ -24,6 +32,7 @@ export const ALL_SPAWN_SAFE_ZONE_AABBS = [
   { minX: -E - H, maxX: -E + H, minZ: -E - H, maxZ: -E + H },
   { minX: E - H, maxX: E + H, minZ: -E - H, maxZ: -E + H },
   { minX: -H, maxX: H, minZ: -E - H, maxZ: -E + H },
+  { minX: E - H, maxX: E + H, minZ: -H, maxZ: H },
 ] as const;
 
 /** Courtyard centers — same order as `ALL_SPAWN_SAFE_ZONE_AABBS` / server `SPAWN_SAFE_ZONES`. Shop interaction XZ is offset via `shops.ts`. */
@@ -37,7 +46,7 @@ export function safeZoneCenterXZ(
   return { x: (a.minX + a.maxX) / 2, z: (a.minZ + a.maxZ) / 2 };
 }
 
-/** Corner outposts (indices 2–5) sell advanced gear; 0, 1, 6 are traveler stalls. */
+/** Corner outposts (indices 2–5) sell advanced gear; center + north/south/east (0, 1, 6, 7) are traveler stalls. */
 export function isAdvancedShopSafeZoneIndex(index: number): boolean {
   return index >= 2 && index <= 5;
 }
@@ -74,6 +83,7 @@ export function isNearAnySafeZoneCastle(
   const c: [number, number][] = [
     [0, E],
     [0, -E],
+    [E, 0],
     [-E, E],
     [E, E],
     [-E, -E],
@@ -86,4 +96,12 @@ export function isPointInSpawnSafeZone(x: number, z: number): boolean {
   return ALL_SPAWN_SAFE_ZONE_AABBS.some(
     (s) => x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ,
   );
+}
+
+/** Which safe-zone AABB contains `(x,z)`, or `null` if in the open desert. */
+export function safeZoneIndexAt(x: number, z: number): number | null {
+  const i = ALL_SPAWN_SAFE_ZONE_AABBS.findIndex(
+    (s) => x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ,
+  );
+  return i >= 0 ? i : null;
 }

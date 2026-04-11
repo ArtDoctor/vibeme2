@@ -47,6 +47,7 @@ describe("normalizeSnapshotPlayer", () => {
     expect(p.gold).toBe(0);
     expect(p.hp).toBe(100);
     expect(p.stamina).toBe(100);
+    expect(p.team).toBe("neutral");
   });
 });
 

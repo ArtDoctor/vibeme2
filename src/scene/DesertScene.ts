@@ -4,6 +4,7 @@ import {
   Color,
   ConeGeometry,
   DirectionalLight,
+  DoubleSide,
   Fog,
   Group,
   HemisphereLight,
@@ -28,6 +29,9 @@ import {
   isNearAnySafeZoneCastle,
   isPointInSpawnSafeZone,
   safeZoneCenterXZ,
+  TEAM_BLUE_SAFE_ZONE_INDEX,
+  TEAM_NEUTRAL_SAFE_ZONE_INDEX,
+  TEAM_RED_SAFE_ZONE_INDEX,
 } from "../world/spawnSafeZone";
 import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
 import { SHOP_SAFE_ZONE_COUNT } from "../world/shops";
@@ -212,6 +216,14 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, -outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, -outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, 0);
+
+  const flagRed = 0xcc4444;
+  const flagBlue = 0x4466cc;
+  const flagNeutral = 0xd8d4c8;
+  addCourtyardTeamFlag(scene, sampleTerrainHeight, TEAM_RED_SAFE_ZONE_INDEX, flagRed);
+  addCourtyardTeamFlag(scene, sampleTerrainHeight, TEAM_BLUE_SAFE_ZONE_INDEX, flagBlue);
+  addCourtyardTeamFlag(scene, sampleTerrainHeight, TEAM_NEUTRAL_SAFE_ZONE_INDEX, flagNeutral);
 
   const shopWallMat = new MeshLambertMaterial({ color: 0x7a6a58 });
   const shopWallMatAdvanced = new MeshLambertMaterial({ color: 0x5c4d3e });
@@ -235,7 +247,6 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     );
   }
 
-  // TODO(multiplayer): mob spawners, boss arenas, team flags.
   // TODO(content): replace cones with proper mountain meshes once art exists.
 
   const spawn = new Vector3(0, sampleTerrainHeight(0, 0), 0);
@@ -254,6 +265,40 @@ export function buildDesertScene(scene: Scene): DesertWorld {
  * Ring of box walls with a south gate gap; stone-grey meshes vs sand terrain.
  * Colliders are tall AABBs — same model as mountains/rocks (`AABBCollider`).
  */
+/** Pole + cloth plane facing the map center — Milestone 5 team markers. */
+function addCourtyardTeamFlag(
+  scene: Scene,
+  sampleGround: (x: number, z: number) => number,
+  zoneIndex: number,
+  flagColor: number,
+): void {
+  const c = safeZoneCenterXZ(zoneIndex);
+  const cx = c.x;
+  const cz = c.z;
+  const baseY = sampleGround(cx, cz);
+  const pole = new Mesh(
+    new BoxGeometry(0.14, 2.5, 0.14),
+    new MeshLambertMaterial({ color: 0x5a5248 }),
+  );
+  pole.position.set(cx, baseY + 1.25, cz);
+  scene.add(pole);
+  const cloth = new Mesh(
+    new PlaneGeometry(0.88, 0.52),
+    new MeshLambertMaterial({
+      color: flagColor,
+      side: DoubleSide,
+    }),
+  );
+  const dx = -cx;
+  const dz = -cz;
+  const len = Math.hypot(dx, dz);
+  const nx = len > 1e-6 ? dx / len : 0;
+  const nz = len > 1e-6 ? dz / len : 1;
+  cloth.position.set(cx + nx * 0.42, baseY + 2.12, cz + nz * 0.42);
+  cloth.rotation.y = Math.atan2(-nx, -nz);
+  scene.add(cloth);
+}
+
 function addSpawnCastle(
   scene: Scene,
   colliders: AABBCollider[],

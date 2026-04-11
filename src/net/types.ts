@@ -3,10 +3,14 @@ export type ServerMsg =
   | JoinErrorMsg
   | SnapshotMsg;
 
+/** PvP faction — assigned on first join, persisted with the session. */
+export type PlayerTeam = "red" | "blue" | "neutral";
+
 export interface WelcomeMsg {
   type: "welcome";
   session: string;
   playerId: string;
+  team: PlayerTeam;
   tickHz: number;
   sessionStorageKey?: string;
 }
@@ -62,6 +66,7 @@ export interface ArmorSlots {
 export interface SnapshotPlayer {
   id: string;
   nickname: string;
+  team: PlayerTeam;
   x: number;
   y: number;
   z: number;

@@ -16,6 +16,7 @@ import { avatarRotationYFromCombatYaw } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
 import type {
   ArmorPieceKind,
+  PlayerTeam,
   SnapshotPlayer,
 } from "../net/types";
 import { lerpAngle, shortestAngleDelta } from "../utils/math";
@@ -46,6 +47,7 @@ function lerpSnapshotPlayer(
   return {
     id: b.id,
     nickname: b.nickname,
+    team: u >= 0.5 ? b.team : a.team,
     x: a.x + (b.x - a.x) * u,
     y: a.y + (b.y - a.y) * u,
     z: a.z + (b.z - a.z) * u,
@@ -125,7 +127,18 @@ function resolveInterpolatedPlayer(
 
 const viewFacingScratch = new Vector3();
 
-const TORSO_MAT = new MeshLambertMaterial({ color: 0x4a8c6a });
+function torsoColorForTeam(team: PlayerTeam): number {
+  switch (team) {
+    case "red":
+      return 0xb83c3c;
+    case "blue":
+      return 0x3c6ab8;
+    case "neutral":
+      return 0x8a8a82;
+    default:
+      return 0x4a8c6a;
+  }
+}
 const HEAD_MAT = new MeshLambertMaterial({ color: 0xe8c4a0 });
 const LIMB_MAT = new MeshLambertMaterial({ color: 0x3d7358 });
 const ARMOR_MAT = new MeshLambertMaterial({ color: 0x9f8451 });
@@ -167,7 +180,10 @@ function makeNicknameSprite(nickname: string): Sprite {
 /** Shared box avatar + weapons (remote players and local third-person). */
 export function createPlayerAvatarRig(nickname: string): Group {
   const root = new Group();
-  const torso = new Mesh(new BoxGeometry(0.52, 0.72, 0.32), TORSO_MAT);
+  const torso = new Mesh(
+    new BoxGeometry(0.52, 0.72, 0.32),
+    new MeshLambertMaterial({ color: torsoColorForTeam("neutral") }),
+  );
   torso.position.y = 0.52;
   const head = new Mesh(new BoxGeometry(0.34, 0.34, 0.34), HEAD_MAT);
   head.position.y = 1.12;
@@ -208,6 +224,7 @@ export function createPlayerAvatarRig(nickname: string): Group {
   root.userData.helm = helm;
   root.userData.chestArmor = chest;
   root.userData.tassets = tassets;
+  root.userData.torso = torso;
   return root;
 }
 
@@ -240,6 +257,11 @@ export function updatePlayerAvatarRig(
   const helm = g.userData.helm as Mesh | undefined;
   const chest = g.userData.chestArmor as Mesh | undefined;
   const tassets = g.userData.tassets as Mesh | undefined;
+  const torsoMesh = g.userData.torso as Mesh | undefined;
+  if (torsoMesh) {
+    const mat = torsoMesh.material as MeshLambertMaterial;
+    mat.color.setHex(torsoColorForTeam(p.team));
+  }
 
   setWeaponVisible(sword, shield, bow, p.mainHand, p.offHand);
   animateWeaponGroups(sword, shield, bow, p);

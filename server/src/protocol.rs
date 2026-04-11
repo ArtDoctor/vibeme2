@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::team::Team;
+
 /// Returns the first decoded client message from the WebSocket stream.
 /// Limits: this is transport-level validation only; gameplay validation happens in `sim.rs`.
 #[derive(Deserialize)]
@@ -65,6 +67,7 @@ pub struct WelcomeOut {
     pub msg_type: &'static str,
     pub session: String,
     pub player_id: String,
+    pub team: Team,
     pub tick_hz: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_storage_key: Option<&'static str>,

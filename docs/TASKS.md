@@ -94,32 +94,46 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
 
 ## Milestone 4 — Economy and progression
 
-- [~] **Shops** — **7 stalls**, one at the center of each **safe-zone** courtyard
-      (same indices as `ALL_SPAWN_SAFE_ZONE_AABBS` / `SAFE_ZONE_SHOP_CENTERS_XZ`).
+- [x] **Shops** — **8 stalls**, one at the center of each **safe-zone** courtyard
+      (same indices as `ALL_SPAWN_SAFE_ZONE_AABBS` / `safe_zone_shop_spot_xz` in `world.rs`).
       **Corner** outposts (NW/NE/SW/SE) sell **advanced** gear (steel, vanguard, …);
-      spawn + **north** + **south** edge stalls sell **traveler** basics (iron, shield,
-      bow, scout armor). Box building + NPC; **E** opens buy UI. Server requires
-      standing in a safe zone + in range of that stall.
-- [ ] **Full inventory system**: carry multiple weapons and items, loot gear from
-      dead players, sell surplus, and choose loadouts or sets when swapping (ties
-      into shop UI and Milestone 2 loadout rules).
-- [ ] **Tiered gear**: starter (wooden sword / base rules in Milestone 2), basic (cheap
-      shop), good (expensive shop), boss-locked (only after killing a boss); shields,
-      bows, better melee, and armor distributed across loot and shops.
-- [ ] **Gold** is the only currency. Server-authoritative balance.
-- [ ] **Permadeath**: on death, server wipes the player's inventory + gold
-      and respawns them at the spawn point with starter loadout.
+      **center** + **north** + **south** + **east** edge stalls sell **traveler** basics (iron, shield,
+      bow, scout armor). Box building + stall in `DesertScene.ts`; **E** opens buy/sell UI.
+      Server requires standing in any safe zone + in range of that stall's service spot.
+- [x] **Full inventory system**: stackable inventory on the server (`server/src/items.rs`),
+      snapshots to the client; loot from **player death** piles (`spawn_death_loot` in
+      `sim.rs`); **sell surplus** at shops (UI + `shop_sell`); loadout via **1/2/3** and
+      shield slot (`CombatInput` + `apply_desired_loadout`).
+- [x] **Tiered gear**: starter wooden sword; **basic** iron + scout armor at traveler stalls;
+      **good** steel at corner shops; **boss-locked** vanguard sword after a boss kill
+      (`boss_unlock`, persists across death); world ring pickups + mob/boss drops for
+      shields, bows, and armor.
+- [x] **Gold** is the only currency; balance and transactions are server-side (`player.gold`,
+      pickups, shops, sell prices in `items.rs`).
+- [x] **Permadeath**: on death, `kill_player_with_loot` drops gold + inventory at the corpse,
+      then `reset_for_respawn` wipes the living player's gold and inventory and teleports
+      to spawn with starter wooden sword (boss unlock flag kept for shop gating).
 
 ## Milestone 5 — Teams and PvP rules
 
-- [ ] **Three teams**: `blue`, `red`, `neutral`. Team is chosen on first join
-      and persisted in the server-side session record.
-- [ ] **No teammate damage** for blue/red. Neutral can damage anyone, anyone
-      can damage neutral.
+- [x] **Three teams**: `blue`, `red`, `neutral`. Team is chosen on first join
+      (balance toward smallest roster) and persisted in the server-side session;
+      `welcome` + snapshots include `team`.
+- [x] **Spawns**: red → north edge safe zone (index 1), blue → south (6),
+      neutral → **east** (7). **Eight** zones total: center, three edge mids (N/S/E), four corners.
+- [x] **No teammate damage** for any team (including neutral vs neutral).
+      **Neutrals cannot deal player damage** to red, blue, or other neutrals.
+      Red and blue **can damage each other** in the open and in war camps (north/south),
+      subject to truce yards below.
+- [x] **Mixed-team truce**: in any safe zone that is **not** a red/blue war camp
+      (center, east neutral yard, + four corners), if **two or more distinct teams** are present in that
+      same courtyard, **no player-vs-player damage** applies there until the
+      courtyard is no longer mixed.
+- [x] **Flags**: client renders team-colored markers at red, blue, and neutral home courtyards.
 - [ ] No formal "party" system. Players can group up freely; cooperation is
       emergent. Boss kill credit goes to everyone who dealt damage above a
       threshold.
-- [ ] Team color visible on the player model (tinted torso box).
+- [x] Team color visible on the remote player model (tinted torso box).
 
 ## Milestone 6 — Multiplayer
 
@@ -134,7 +148,7 @@ runs; server is authoritative; client keeps only a session token in
       In-memory nick uniqueness for connected players; persistence across deploys
       not done yet.
 - [x] **Nickname labels above players**: canvas-texture sprites above remote
-      box avatars. Own avatar hidden (first-person). Team tint: still todo
+      box avatars. Own avatar hidden (first-person). Team tint on remote torso
       (Milestone 5).
 - [ ] **Money leaderboard (top-right HUD)**: persistent panel listing the
       top N players by gold, updated from server broadcasts. Shows nickname,
@@ -146,26 +160,22 @@ runs; server is authoritative; client keeps only a session token in
 - [x] **Movement validation**: Rust uses the same terrain function + collider
       list as `DesertScene` / `terrain.ts`, clamps speed, resolves AABBs, snaps
       ground (see `server/src/world.rs`, `server/src/validate.rs`).
-- [~] **Tick rate**: 20 Hz snapshots over WebSocket; remote poses snap (no
-      interpolation yet).
-- [~] **Cheat surface**: positions derived from client-reported pose with
+- [x] **Tick rate**: 20 Hz snapshots over WebSocket; remote poses snap (and 
+      interpolation).
       server clamp + collision; no inventory/HP yet.
-- [~] **Deployment**: **Dockerfile** at repo root (Node build + `cargo build`,
-      runtime serves `dist/` + `/ws`). Docker Compose file still optional;
-      Coolify can build/run the Dockerfile directly.
+- [x] **Deployment**.
 
 ## Milestone 7 — Polish and content
 
-- [ ] Replace cone mountains with low-poly mesh imports (still simple).
 - [~] Bigger world, multiple biomes (still desert-themed for v1).
       Current state: the desert bounds are now 3x larger in each direction with
       more procedural mountains and rocks; biome/content variety is still todo.
 - [ ] **Safe zones vs chaos zones**: divide the map so **safe zones** are a
-      minority of the area (spawn castle and any future havens). The **chaos
+      minority of the area (spawn castles). The **chaos
       zones** — everywhere else — pack heavy mob and boss presence. Survival
       there should push players to **move fast** or **group up**; solo slow
       play in the open should be punishing. Server rules for aggro, spawn
-      density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs.
+      density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs. Make the mobs by default follow the player, but if the players are in safe zone, mobs should keep distances from safe zones.
 - [ ] Sound effects (WebAudio, no external lib).
 - [ ] **Global boss-kill TTS**: when someone lands the **final blow** on a huge boss,
       play a text-to-speech line for everyone: their nickname plus a short joke or riff

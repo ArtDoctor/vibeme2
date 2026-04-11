@@ -39,7 +39,9 @@ it serves the Vite `dist/` assets and runs authoritative movement validation
 (`server/src/validate.rs`) against the shared terrain + collider data.
 Authoritative combat (melee, arrows, HP/stamina, death/respawn) lives in
 `server/src/combat.rs` and is driven by extra fields on the same `input`
-messages plus the 20 Hz tick loop.
+messages plus the tick loop. Team PvP rules (friendly fire, neutral damage,
+mixed-team truce yards) are enforced in `server/src/sim.rs` using safe-zone
+indices from `world.rs` (`safe_zone_index_at`, war-camp vs diplomatic yards).
 
 ```
 server/src/
@@ -56,6 +58,7 @@ server/src/
                                 boss tank/summoner, extrusion from safe zones, creep spawns.
   validate.rs                   Authoritative movement clamp against terrain + colliders.
   world.rs                      Shared terrain/collider source of truth for the server.
+  team.rs                       PvP faction enum (`red` / `blue` / `neutral`) for snapshots and welcome.
 ```
 
 ### Why this split

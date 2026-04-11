@@ -18,6 +18,7 @@ import type {
   SnapshotArrow,
   SnapshotMob,
   SnapshotMsg,
+  PlayerTeam,
   SnapshotPlayer,
   WeaponKind,
 } from "./types";
@@ -50,6 +51,13 @@ function str(v: unknown, fallback: string): string {
 
 function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
+}
+
+export function normalizePlayerTeam(raw: unknown): PlayerTeam {
+  if (raw === "red" || raw === "blue" || raw === "neutral") {
+    return raw;
+  }
+  return "neutral";
 }
 
 export function normalizeWeaponKind(raw: unknown): WeaponKind {
@@ -152,6 +160,7 @@ export function normalizeSnapshotPlayer(raw: unknown): SnapshotPlayer {
   return {
     id: str(o.id, ""),
     nickname: str(o.nickname, "player"),
+    team: normalizePlayerTeam(o.team),
     x: num(o.x, 0),
     y: num(o.y, 0),
     z: num(o.z, 0),

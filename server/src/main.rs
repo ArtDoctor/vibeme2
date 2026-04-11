@@ -4,6 +4,7 @@ mod items;
 mod mobs;
 mod protocol;
 mod sim;
+mod team;
 mod validate;
 mod world;
 
@@ -26,6 +27,7 @@ use uuid::Uuid;
 use crate::items::inventory_item_kind_from_client;
 use crate::protocol::{ClientMsg, JoinErrorOut, WelcomeOut};
 use crate::sim::{valid_nickname, InputCommand, SimConfig, Simulation, SnapshotFrame};
+use crate::team::Team;
 use crate::world::{build_colliders, AabbCollider};
 
 const TICK_HZ: u32 = 30;
@@ -127,7 +129,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     };
 
-    let (player_id, session_token) = match msg {
+    let (player_id, session_token, team) = match msg {
         ClientMsg::Join { nickname, session } => {
             match resolve_join(&sim, &mut write_half, nickname, session).await {
                 Some(join) => join,
@@ -145,6 +147,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         msg_type: "welcome",
         session: session_token.to_string(),
         player_id: player_id.to_string(),
+        team,
         tick_hz: TICK_HZ,
         session_storage_key: Some(SESSION_KEY),
     };
@@ -277,7 +280,7 @@ async fn resolve_join(
     write_half: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     nickname: String,
     session: Option<String>,
-) -> Option<(Uuid, Uuid)> {
+) -> Option<(Uuid, Uuid, Team)> {
     if let Some(raw_session) = session {
         return resolve_session_join(sim, write_half, raw_session).await;
     }
@@ -306,7 +309,7 @@ async fn resolve_session_join(
     sim: &Arc<RwLock<Simulation>>,
     write_half: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     raw_session: String,
-) -> Option<(Uuid, Uuid)> {
+) -> Option<(Uuid, Uuid, Team)> {
     let session = match Uuid::parse_str(&raw_session) {
         Ok(session) => session,
         Err(_) => {
@@ -318,7 +321,12 @@ async fn resolve_session_join(
 
     let simulation = sim.read().await;
     match simulation.player_by_session(session) {
-        Some(player_id) if simulation.has_player(player_id) => Some((player_id, session)),
+        Some(player_id) if simulation.has_player(player_id) => {
+            let team = simulation
+                .player_team(player_id)
+                .expect("team exists for connected player");
+            Some((player_id, session, team))
+        }
         _ => {
             send_join_error(
                 write_half,
