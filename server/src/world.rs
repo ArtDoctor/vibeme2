@@ -8,6 +8,12 @@ pub const SPAWN_SAFE_ZONE_HALF: f64 = 5.0;
 pub const SAFE_ZONE_EDGE_INSET: f64 = 15.0;
 
 /// Axis-aligned safe zones `(min_x, max_x, min_z, max_z)` — same layout as `ALL_SPAWN_SAFE_ZONE_AABBS` in `spawnSafeZone.ts`.
+/// Fixed boss arenas (flat desert, outside safe castles). See `docs/TASKS.md` Milestone 3.
+pub const BOSS_TANK_X: f64 = -155.0;
+pub const BOSS_TANK_Z: f64 = 175.0;
+pub const BOSS_SUMMONER_X: f64 = 165.0;
+pub const BOSS_SUMMONER_Z: f64 = -170.0;
+
 pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 6] = {
     let h = SPAWN_SAFE_ZONE_HALF;
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;

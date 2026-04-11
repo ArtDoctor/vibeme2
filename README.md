@@ -23,8 +23,9 @@ npm run server       # cargo run — serves dist/ + WebSocket (after npm run bui
 Rust tests: `cargo test --manifest-path server/Cargo.toml` (includes headless
 authoritative simulation scenarios in `server/src/sim.rs`)
 
-Click the canvas to lock the mouse. **WASD** to move, **Space** to jump,
-**Esc** to release the mouse.
+Click the canvas to lock the mouse. **WASD** to move, **Shift** to sprint,
+**Space** to jump, **Q** to descend in creative fly mode, **Esc** to release
+the mouse.
 
 ## Stack
 

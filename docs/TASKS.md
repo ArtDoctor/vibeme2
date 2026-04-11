@@ -15,7 +15,7 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
       sky/fog, scattered cone "mountains" (big and small), cube rocks.
 - [x] Analytic heightfield (`scene/terrain.ts`) shared by render mesh and player.
 - [x] First-person controls module: WASD + mouselook + jump + gravity, plus
-      sprint (`Ctrl`) and creative fly mode (`L`, double-tap `Space`, `Shift` descend).
+      sprint (`Shift`) and creative fly mode (`L`, double-tap `Space`, `Q` descend).
 - [x] AABB collision against mountains/rocks with circle-vs-box separation.
 - [x] Stable resize (no NaN aspect, no canvas crash on minimise).
 - [x] `npm run smoke:ci` — production build + HTTP smoke test.
@@ -63,7 +63,7 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
 
 Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / dead`.
 
-- [ ] **Telegraphed melee attacks**: mobs close to melee range, play a wind-up
+- [x] **Telegraphed melee attacks**: mobs close to melee range, play a wind-up
       (e.g. jump animation), then deal damage on a timed beat. If the player blocks
       or moves away in time, no hit. Replace the current feel of mobs walking into
       the player and dealing sloppy contact damage.
@@ -71,9 +71,9 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
       high HP pool that resets when depleted; melee and bow can damage it from
       the safe zone. Client: HP bar + floating damage numbers for local hits.
 
-- [ ] **Small mob** (3–4 boxes, like the player): wanders, aggros at ~10m,
-      melees on contact, dies in 2–3 hits, drops a small amount of gold.
-- [ ] **Aggro range and chained aggro**: a mob targets a player only when
+- [x] **Small mob** (3–4 boxes, like the player): wanders, aggros at ~10m,
+      telegraphed melee (not contact damage), dies in 2–3 hits, drops a small amount of gold.
+- [x] **Aggro range and chained aggro**: a mob targets a player only when
       the player is within its **base aggro radius** (small mobs ~10 m, bosses
       ~25 m). However, if the player is within an **extended radius** (say
       1.8× the base) AND has already engaged a *nearby* enemy of the same
@@ -81,16 +81,16 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
       starting one fight pulls neighbours, but a player walking quietly past
       at medium range is left alone. Server-authoritative; aggro is a state
       on the mob, not on the client.
-- [ ] **Safe zone respect**: mobs never path into the spawn castle and never
+- [x] **Safe zone respect**: mobs never path into the spawn castle and never
       aggro a player who is currently inside it. (See Milestone 1.5.)
-- [ ] **Boss A — Tank**: oversized box body, very high HP, slow, ranged
+- [x] **Boss A — Tank**: oversized box body, very high HP, slow, ranged
       heavy attack (large slow projectile). Designed to require a shield to
       survive frontally. Spawns in a fixed arena.
-- [ ] **Boss B — Summoner**: faster than Tank, lower HP, can spawn small mobs
+- [x] **Boss B — Summoner**: faster than Tank, lower HP, can spawn small mobs
       around itself on a cooldown. Designed to punish solo play.
-- [ ] Loot tables: small mobs drop gold; bosses drop gold + a chance at a
+- [x] Loot tables: small mobs drop gold; bosses drop gold + a chance at a
       gear upgrade token.
-- [ ] Authoritative HP and positions on the server (see Multiplayer).
+- [x] Authoritative HP and positions on the server (see Multiplayer).
 
 ## Milestone 4 — Economy and progression
 

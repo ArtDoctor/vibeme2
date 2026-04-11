@@ -3,6 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Sync: block Ctrl/Cmd+S before deferred module graph (main.ts) loads. -->
+    <script>
+      (function () {
+        window.addEventListener(
+          "keydown",
+          function (e) {
+            if (!e.ctrlKey && !e.metaKey) return;
+            if (e.key === "s" || e.key === "S" || e.code === "KeyS") {
+              e.preventDefault();
+            }
+          },
+          true,
+        );
+      })();
+    </script>
     <title>vibeme2 — Knight Realm</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
@@ -86,8 +101,9 @@
       </div>
       <div id="hud" class="hud" aria-live="polite">
         <p>
-          Click to look · WASD move · Space jump · 1 sword · 2 shield toggle · 3 bow
-          · sword LMB · shield RMB · bow hold/release LMB · Esc release mouse
+          Click to look · WASD move · Shift sprint · Space jump · Q descend (fly)
+          · 1 sword · 2 shield toggle · 3 bow · sword LMB · shield RMB · bow
+          hold/release LMB · Esc release mouse
         </p>
       </div>
     </div>

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeMainHandKind,
+  normalizeSnapshotMob,
   normalizeSnapshotMsg,
+  normalizeSnapshotPickup,
   normalizeSnapshotPlayer,
   normalizeWeaponKind,
 } from "./snapshotNormalize";
+import { BOSS_TANK_HP, MOB_HP } from "../combat/constants";
 
 describe("normalizeWeaponKind", () => {
   it("defaults unknown to sword", () => {
@@ -73,5 +76,43 @@ describe("normalizeSnapshotMsg", () => {
       mobs: [],
     });
     expect(m.pickups).toEqual([{ id: 4, kind: "armor", x: 1, y: 2, z: 3 }]);
+  });
+});
+
+describe("normalizeSnapshotMob", () => {
+  it("maps boss kinds and default maxHp", () => {
+    const tank = normalizeSnapshotMob({
+      id: 1,
+      kind: "bossTank",
+      x: 0,
+      y: 1,
+      z: 2,
+      hp: 100,
+    });
+    expect(tank.kind).toBe("bossTank");
+    expect(tank.maxHp).toBe(BOSS_TANK_HP);
+
+    const creep = normalizeSnapshotMob({
+      id: 2,
+      kind: "creep",
+      hp: 10,
+    });
+    expect(creep.kind).toBe("creep");
+    expect(creep.maxHp).toBe(MOB_HP);
+  });
+});
+
+describe("normalizeSnapshotPickup", () => {
+  it("includes goldAmount for gold pickups", () => {
+    const p = normalizeSnapshotPickup({
+      id: 3,
+      kind: "gold",
+      goldAmount: 12,
+      x: 0,
+      y: 1,
+      z: 0,
+    });
+    expect(p.kind).toBe("gold");
+    expect(p.goldAmount).toBe(12);
   });
 });

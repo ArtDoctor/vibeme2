@@ -24,6 +24,8 @@ pub const STAMINA_BOW_FIRE: f64 = 20.0;
 pub const SWING_COOLDOWN_S: f64 = 0.45;
 pub const BOW_MIN_CHARGE: f64 = 0.25;
 pub const ARROW_SPEED: f64 = 42.0;
+/// Slow boss tank projectile; shield frontal blocks completely when `heavy`.
+pub const BOSS_ARROW_SPEED: f64 = 20.0;
 pub const ARROW_GRAVITY: f64 = 12.0;
 pub const HIT_CYLINDER_HEIGHT: f64 = 1.75;
 
@@ -185,6 +187,38 @@ pub fn arrow_hits_vertical_cylinder(
 /// Point arrow vs vertical cylinder at player feet (XZ circle + Y slab).
 pub fn arrow_hits_player(ax: f64, ay: f64, az: f64, px: f64, eye_y: f64, pz: f64) -> bool {
     arrow_hits_vertical_cylinder(ax, ay, az, px, eye_y, pz, PLAYER_RADIUS)
+}
+
+/// Heavy projectile from a boss mob (`owner` is [`Uuid::nil()`]); uses lower speed than player arrows.
+pub fn spawn_arrow_from_mob(
+    id: u32,
+    x: f64,
+    eye_y: f64,
+    z: f64,
+    target_x: f64,
+    target_eye_y: f64,
+    target_z: f64,
+) -> Arrow {
+    let hand_y = eye_y - 0.35;
+    let tx = target_x - x;
+    let ty = target_eye_y - hand_y;
+    let tz = target_z - z;
+    let len = (tx * tx + ty * ty + tz * tz).sqrt().max(1e-6);
+    let vx = tx / len * BOSS_ARROW_SPEED;
+    let vy = ty / len * BOSS_ARROW_SPEED;
+    let vz = tz / len * BOSS_ARROW_SPEED;
+    Arrow {
+        id,
+        owner: Uuid::nil(),
+        x,
+        y: hand_y,
+        z,
+        vx,
+        vy,
+        vz,
+        heavy: true,
+        deals_damage: true,
+    }
 }
 
 pub fn spawn_arrow_from_player(

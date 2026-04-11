@@ -26,6 +26,18 @@ const deathRevive = document.getElementById("death-revive");
 const deathMenu = document.getElementById("death-menu");
 
 let game: Game | undefined;
+const BLOCKED_BROWSER_SHORTCUT_CODES = new Set(["KeyS", "KeyW"]);
+
+function isBlockedBrowserShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return false;
+  }
+  const tag = target.tagName;
+  return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
+}
 
 function showJoinError(message: string): void {
   if (joinError) {
@@ -153,6 +165,19 @@ if (deathMenu instanceof HTMLButtonElement) {
     showJoinPanel();
   });
 }
+
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (!BLOCKED_BROWSER_SHORTCUT_CODES.has(e.code)) return;
+    if (document.pointerLockElement !== gameCanvas) return;
+    if (!isBlockedBrowserShortcutTarget(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true,
+);
 
 // Vite HMR cleanup so dev reloads don't stack up listeners + WebGL contexts.
 if (import.meta.hot) {

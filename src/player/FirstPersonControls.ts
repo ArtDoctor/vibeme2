@@ -378,6 +378,11 @@ export class FirstPersonControls {
         this.keyForward = true;
         break;
       case "KeyS":
+        if (e.ctrlKey || e.metaKey) {
+          break;
+        }
+        this.keyBackward = true;
+        break;
       case "ArrowDown":
         this.keyBackward = true;
         break;
@@ -409,12 +414,11 @@ export class FirstPersonControls {
           }
         }
         break;
-      case "ShiftLeft":
-      case "ShiftRight":
+      case "KeyQ":
         this.keyDescend = true;
         break;
-      case "ControlLeft":
-      case "ControlRight":
+      case "ShiftLeft":
+      case "ShiftRight":
         this.keySprint = true;
         break;
       case "KeyL":
@@ -459,12 +463,11 @@ export class FirstPersonControls {
       case "Space":
         this.keyAscend = false;
         break;
-      case "ShiftLeft":
-      case "ShiftRight":
+      case "KeyQ":
         this.keyDescend = false;
         break;
-      case "ControlLeft":
-      case "ControlRight":
+      case "ShiftLeft":
+      case "ShiftRight":
         this.keySprint = false;
         break;
       default:

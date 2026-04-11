@@ -10,6 +10,8 @@ import type { SnapshotPickup } from "../net/types";
 const SHIELD_MAT = new MeshLambertMaterial({ color: 0x7d8fa5 });
 const BOW_MAT = new MeshLambertMaterial({ color: 0x946234 });
 const ARMOR_MAT = new MeshLambertMaterial({ color: 0xa7864d });
+const GOLD_MAT = new MeshLambertMaterial({ color: 0xc9a227 });
+const TOKEN_MAT = new MeshLambertMaterial({ color: 0x9b7cff });
 
 type PickupView = {
   root: Group;
@@ -80,6 +82,12 @@ function buildPickupMesh(kind: SnapshotPickup["kind"]): Group {
       break;
     case "armor":
       mesh = new Mesh(new BoxGeometry(0.55, 0.55, 0.28), ARMOR_MAT);
+      break;
+    case "gold":
+      mesh = new Mesh(new BoxGeometry(0.38, 0.22, 0.38), GOLD_MAT);
+      break;
+    case "gearToken":
+      mesh = new Mesh(new BoxGeometry(0.32, 0.08, 0.42), TOKEN_MAT);
       break;
     default:
       mesh = new Mesh(new BoxGeometry(0.52, 0.68, 0.08), SHIELD_MAT);

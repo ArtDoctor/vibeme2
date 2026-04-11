@@ -15,6 +15,9 @@ export const MAX_STAMINA = 100;
 export const MOB_HP = 28;
 /** Matches `server/src/mobs.rs` `TRAINING_DUMMY_HP`. */
 export const TRAINING_DUMMY_HP = 10_000;
+/** Matches `server/src/mobs.rs` boss HP. */
+export const BOSS_TANK_HP = 900;
+export const BOSS_SUMMONER_HP = 320;
 
 /** Must match `server/src/combat.rs` `BOW_MIN_CHARGE`. */
 export const BOW_MIN_CHARGE = 0.25;

@@ -26,8 +26,9 @@ export type InventoryItemKind =
   | "shortBow"
   | "scoutHelm"
   | "scoutChest"
-  | "scoutLegs";
-export type PickupKind = "shield" | "bow" | "armor";
+  | "scoutLegs"
+  | "gearUpgradeToken";
+export type PickupKind = "shield" | "bow" | "armor" | "gold" | "gearToken";
 
 export interface InventoryEntry {
   kind: InventoryItemKind;
@@ -76,9 +77,15 @@ export interface SnapshotPickup {
   x: number;
   y: number;
   z: number;
+  /** Present when `kind === "gold"`. */
+  goldAmount?: number;
 }
 
-export type MobKind = "creep" | "trainingDummy";
+export type MobKind =
+  | "creep"
+  | "trainingDummy"
+  | "bossTank"
+  | "bossSummoner";
 
 export interface SnapshotMob {
   id: number;

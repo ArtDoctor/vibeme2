@@ -52,7 +52,8 @@ server/src/
                                 pickup spawning/collection, snapshot building, and headless
                                 scenario tests.
   combat.rs                     Pure-ish combat math and projectile helpers.
-  mobs.rs                       Mob AI/state updates and spawn rules.
+  mobs.rs                       Mob AI (idle/chase/telegraphed melee), aggro + chained pull,
+                                boss tank/summoner, extrusion from safe zones, creep spawns.
   validate.rs                   Authoritative movement clamp against terrain + colliders.
   world.rs                      Shared terrain/collider source of truth for the server.
 ```

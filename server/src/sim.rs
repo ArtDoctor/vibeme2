@@ -6,8 +6,8 @@ use uuid::Uuid;
 use crate::combat::{
     arrow_hits_player, damage_after_armor, damage_after_shield_melee,
     damage_after_shield_ranged, frontal_dot, integrate_arrow, melee_hit_valid,
-    point_in_spawn_safe_zone, spawn_arrow_from_player, Arrow, WeaponKind, ARROW_DAMAGE,
-    BOW_MIN_CHARGE, MAX_HP, MAX_STAMINA, MELEE_DAMAGE, STAMINA_BLOCK_PER_S,
+    point_in_spawn_safe_zone, spawn_arrow_from_mob, spawn_arrow_from_player, Arrow, WeaponKind,
+    ARROW_DAMAGE, BOW_MIN_CHARGE, MAX_HP, MAX_STAMINA, MELEE_DAMAGE, STAMINA_BLOCK_PER_S,
     STAMINA_BOW_CHARGE_PER_S, STAMINA_BOW_FIRE, STAMINA_MELEE, STAMINA_REGEN_PER_S,
     SWING_COOLDOWN_S,
 };
@@ -18,8 +18,9 @@ use crate::items::{
     MainHandKind, OffHandKind, PickupKind,
 };
 use crate::mobs::{
-    mob_arrow_hit, mob_max_hp, spawn_training_dummy, tick_mobs, Mob, MobKind, MobPlayerHit,
-    TRAINING_DUMMY_HP,
+    loot_for_death, mob_arrow_hit, mob_max_hp, push_engagement, spawn_boss_summoner,
+    spawn_boss_tank, spawn_training_dummy, tick_mobs, BossArrowPlan, Mob, MobEngagement, MobKind,
+    MobPlayerHit, TRAINING_DUMMY_HP,
 };
 use crate::validate::clamp_claimed_position;
 use crate::world::{sample_terrain_height, AabbCollider, EYE_HEIGHT};
@@ -32,12 +33,18 @@ const PICKUP_VISIBILITY_RADIUS: f64 = 78.0;
 const PICKUP_RADIUS: f64 = 1.25;
 const PICKUP_RESPAWN_S: f64 = 4.0;
 
+#[inline]
+fn pickup_gold_is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 /// Returns boot-time simulation options for world setup and automated tests.
 /// Limits: these flags only control initial content and passive spawning; runtime content systems still mutate state directly.
 #[derive(Clone, Copy, Debug)]
 pub struct SimConfig {
     pub spawn_training_dummy: bool,
     pub auto_spawn_creeps: bool,
+    pub spawn_world_bosses: bool,
 }
 
 impl Default for SimConfig {
@@ -45,6 +52,7 @@ impl Default for SimConfig {
         Self {
             spawn_training_dummy: true,
             auto_spawn_creeps: true,
+            spawn_world_bosses: true,
         }
     }
 }
@@ -97,6 +105,8 @@ struct Pickup {
     x: f64,
     y: f64,
     z: f64,
+    /// Gold pieces when `kind == Gold`; otherwise 0.
+    gold_amount: u32,
 }
 
 /// Returns a transport-ready full-world snapshot for all connected clients.
@@ -158,6 +168,8 @@ struct PickupSnapshot {
     x: f64,
     y: f64,
     z: f64,
+    #[serde(default, skip_serializing_if = "pickup_gold_is_zero")]
+    gold_amount: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -217,6 +229,8 @@ pub struct Simulation {
     mob_spawn_timer: f64,
     pickup_spawn_timer: f64,
     next_mob_id: u32,
+    mob_engagements: Vec<MobEngagement>,
+    loot_salt: u64,
     damage_floats: Vec<DamageFloatSnapshot>,
     deaths_this_tick: Vec<Uuid>,
 }
@@ -248,6 +262,8 @@ fn mob_kind_tag(mob: &Mob) -> &'static str {
     match mob.kind {
         MobKind::Creep => "creep",
         MobKind::TrainingDummy => "trainingDummy",
+        MobKind::BossTank => "bossTank",
+        MobKind::BossSummoner => "bossSummoner",
     }
 }
 
@@ -256,6 +272,7 @@ fn pickup_target_count(kind: PickupKind) -> u32 {
         PickupKind::Shield => 20,
         PickupKind::Bow => 20,
         PickupKind::Armor => 10,
+        PickupKind::Gold | PickupKind::GearToken => 0,
     }
 }
 
@@ -264,6 +281,7 @@ fn pickup_slot_position(kind: PickupKind, slot: u32) -> (f64, f64) {
         PickupKind::Shield => (10_u32, 24.0, 20.0, 0.2),
         PickupKind::Bow => (10_u32, 34.0, 20.0, 0.52),
         PickupKind::Armor => (5_u32, 52.0, 18.0, 0.88),
+        PickupKind::Gold | PickupKind::GearToken => (1_u32, 0.0, 1.0, 0.0),
     };
     let ring = slot / per_ring;
     let ring_slot = slot % per_ring;
@@ -526,6 +544,12 @@ impl Simulation {
             mobs.push(spawn_training_dummy(next_mob_id));
             next_mob_id += 1;
         }
+        if config.spawn_world_bosses {
+            mobs.push(spawn_boss_tank(next_mob_id));
+            next_mob_id += 1;
+            mobs.push(spawn_boss_summoner(next_mob_id));
+            next_mob_id += 1;
+        }
         let mut sim = Self {
             config,
             players: HashMap::new(),
@@ -539,6 +563,8 @@ impl Simulation {
             mob_spawn_timer: 0.0,
             pickup_spawn_timer: PICKUP_RESPAWN_S,
             next_mob_id,
+            mob_engagements: Vec::new(),
+            loot_salt: 1,
             damage_floats: Vec::new(),
             deaths_this_tick: Vec::new(),
         };
@@ -682,20 +708,40 @@ impl Simulation {
             -1.0
         };
         let mut next_mob_id = self.next_mob_id;
+        let mut pending_boss_arrows: Vec<BossArrowPlan> = Vec::new();
         let mob_hits = tick_mobs(
             &mut self.mobs,
             &poses,
+            &mut self.mob_engagements,
             dt,
             colliders,
             &mut spawn_timer,
             &mut next_mob_id,
             world_tick,
+            &mut pending_boss_arrows,
         );
         if self.config.auto_spawn_creeps {
             self.mob_spawn_timer = spawn_timer.max(0.0);
             self.next_mob_id = next_mob_id;
+        } else {
+            self.next_mob_id = next_mob_id;
         }
         self.apply_mob_player_hits(mob_hits);
+        for plan in pending_boss_arrows {
+            if let Some(mob) = self.mobs.iter().find(|m| m.id == plan.mob_id) {
+                let arrow = spawn_arrow_from_mob(
+                    self.next_arrow_id,
+                    mob.x,
+                    mob.y,
+                    mob.z,
+                    plan.tx,
+                    plan.ty,
+                    plan.tz,
+                );
+                self.next_arrow_id = self.next_arrow_id.wrapping_add(1);
+                self.arrows.push(arrow);
+            }
+        }
     }
 
     /// Returns the latest full-world frame and drains one-tick visual events like damage floats and deaths.
@@ -763,6 +809,7 @@ impl Simulation {
                 x: pickup.x,
                 y: pickup.y,
                 z: pickup.z,
+                gold_amount: pickup.gold_amount,
             })
             .collect::<Vec<_>>();
         pickups.sort_unstable_by_key(|pickup| pickup.id);
@@ -857,6 +904,7 @@ impl Simulation {
                     x,
                     y,
                     z,
+                    gold_amount: 0,
                 });
                 self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
                 if self.pickups.iter().filter(|pickup| pickup.kind == kind).count() as u32 >= target
@@ -864,6 +912,41 @@ impl Simulation {
                     break;
                 }
             }
+        }
+    }
+
+    fn drop_mob_loot(&mut self, kind: MobKind, mob_id: u32, x: f64, z: f64) {
+        let Some((gold, token)) = loot_for_death(kind, mob_id, self.loot_salt) else {
+            return;
+        };
+        self.loot_salt = self.loot_salt.wrapping_add(109);
+        let y = sample_terrain_height(x, z) + 0.55;
+        if gold > 0 {
+            self.pickups.push(Pickup {
+                id: self.next_pickup_id,
+                kind: PickupKind::Gold,
+                slot: 0,
+                x,
+                y,
+                z,
+                gold_amount: gold,
+            });
+            self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
+        }
+        if token {
+            let xt = x + 0.2;
+            let zt = z + 0.35;
+            let yt = sample_terrain_height(xt, zt) + 0.55;
+            self.pickups.push(Pickup {
+                id: self.next_pickup_id,
+                kind: PickupKind::GearToken,
+                slot: 0,
+                x: xt,
+                y: yt,
+                z: zt,
+                gold_amount: 0,
+            });
+            self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
         }
     }
 
@@ -877,7 +960,12 @@ impl Simulation {
                     let dx = player.x - pickup.x;
                     let dz = player.z - pickup.z;
                     if dx * dx + dz * dz + dy * dy <= PICKUP_RADIUS * PICKUP_RADIUS {
-                        Some((pickup.id, *player_id, pickup.kind))
+                        Some((
+                            pickup.id,
+                            *player_id,
+                            pickup.kind,
+                            pickup.gold_amount,
+                        ))
                     } else {
                         None
                     }
@@ -888,7 +976,7 @@ impl Simulation {
             return;
         }
 
-        for (_, player_id, kind) in &pickup_ids {
+        for (_, player_id, kind, gold_amount) in &pickup_ids {
             if let Some(player) = self.players.get_mut(player_id) {
                 match kind {
                     PickupKind::Shield => {
@@ -910,6 +998,14 @@ impl Simulation {
                             legs: Some(ArmorPieceKind::ScoutLegs),
                         };
                     }
+                    PickupKind::Gold => {
+                        player.gold = player.gold.saturating_add(*gold_amount);
+                    }
+                    PickupKind::GearToken => {
+                        player
+                            .inventory
+                            .add(InventoryItemKind::GearUpgradeToken, 1);
+                    }
                 }
             }
         }
@@ -917,7 +1013,7 @@ impl Simulation {
         self.pickups.retain(|pickup| {
             !pickup_ids
                 .iter()
-                .any(|(pickup_id, _, _)| *pickup_id == pickup.id)
+                .any(|(pickup_id, _, _, _)| *pickup_id == pickup.id)
         });
     }
 
@@ -929,7 +1025,19 @@ impl Simulation {
             if point_in_spawn_safe_zone(player.x, player.z) {
                 continue;
             }
-            let damage = damage_after_armor(hit.damage, player.equipment.armor);
+            let vx = hit.mob_x - player.x;
+            let vz = hit.mob_z - player.z;
+            let frontal = frontal_dot(player.yaw, vx, vz);
+            let damage = damage_after_armor(
+                damage_after_shield_melee(
+                    hit.damage,
+                    player.blocking,
+                    player.equipment.off_hand == Some(OffHandKind::BasicShield)
+                        && player.equipment.main_hand == MainHandKind::WoodenSword,
+                    frontal,
+                ),
+                player.equipment.armor,
+            );
             player.hp = (player.hp - damage).max(0.0);
             if player.hp <= 0.0 {
                 self.deaths_this_tick.push(hit.player);
@@ -991,23 +1099,38 @@ impl Simulation {
             .collect::<Vec<_>>();
 
         for mob_index in mob_hit_indices {
-            let pos = {
+            let (fx, fy, fz, died, mk, mid, mx, mz) = {
                 let Some(mob) = self.mobs.get_mut(mob_index) else {
                     continue;
                 };
+                push_engagement(
+                    &mut self.mob_engagements,
+                    attacker_id,
+                    mob.x,
+                    mob.z,
+                    mob.kind,
+                );
                 mob.hp -= MELEE_DAMAGE;
                 if mob.kind == MobKind::TrainingDummy && mob.hp <= 0.0 {
                     mob.hp = TRAINING_DUMMY_HP;
                 }
-                (mob.x, mob.y + 0.35, mob.z)
+                let died = mob.hp <= 0.0 && mob.kind != MobKind::TrainingDummy;
+                let mk = mob.kind;
+                let mid = mob.id;
+                let mx = mob.x;
+                let mz = mob.z;
+                (mob.x, mob.y + 0.35, mob.z, died, mk, mid, mx, mz)
             };
             self.damage_floats.push(DamageFloatSnapshot {
                 source_id: attacker_id.to_string(),
-                x: pos.0,
-                y: pos.1,
-                z: pos.2,
+                x: fx,
+                y: fy,
+                z: fz,
                 amount: MELEE_DAMAGE,
             });
+            if died {
+                self.drop_mob_loot(mk, mid, mx, mz);
+            }
         }
 
         if attacker_in_safe {
@@ -1130,21 +1253,43 @@ impl Simulation {
                 }
             }
             if let Some(mob_index) = mob_hit_index {
-                let pos = {
+                let (fx, fy, fz, died, mk, mid, mx, mz) = {
                     let mob = &mut self.mobs[mob_index];
+                    if owner != Uuid::nil() {
+                        push_engagement(
+                            &mut self.mob_engagements,
+                            owner,
+                            mob.x,
+                            mob.z,
+                            mob.kind,
+                        );
+                    }
                     mob.hp -= ARROW_DAMAGE;
                     if mob.kind == MobKind::TrainingDummy && mob.hp <= 0.0 {
                         mob.hp = TRAINING_DUMMY_HP;
                     }
-                    (mob.x, mob.y + 0.35, mob.z)
+                    let died = mob.hp <= 0.0 && mob.kind != MobKind::TrainingDummy;
+                    (
+                        mob.x,
+                        mob.y + 0.35,
+                        mob.z,
+                        died,
+                        mob.kind,
+                        mob.id,
+                        mob.x,
+                        mob.z,
+                    )
                 };
                 self.damage_floats.push(DamageFloatSnapshot {
                     source_id: owner.to_string(),
-                    x: pos.0,
-                    y: pos.1,
-                    z: pos.2,
+                    x: fx,
+                    y: fy,
+                    z: fz,
                     amount: ARROW_DAMAGE,
                 });
+                if died {
+                    self.drop_mob_loot(mk, mid, mx, mz);
+                }
                 self.arrows.swap_remove(index);
                 continue;
             }
@@ -1213,6 +1358,7 @@ impl Simulation {
 mod tests {
     use super::*;
     use crate::items::{InventoryItemKind, MainHandKind, OffHandKind};
+    use crate::mobs::MobMoveState;
     use crate::world::build_colliders;
 
     fn create_creep(id: u32, x: f64, z: f64) -> Mob {
@@ -1223,7 +1369,14 @@ mod tests {
             y: sample_terrain_height(x, z) + crate::mobs::MOB_EYE_HEIGHT,
             z,
             hp: crate::mobs::MOB_HP,
-            hit_cd: 0.0,
+            move_state: MobMoveState::Idle,
+            state_timer: 0.0,
+            aggro: None,
+            wander_yaw: 0.0,
+            wander_timer: 1.0,
+            boss_cd: 0.0,
+            facing_yaw: 0.0,
+            melee_cd: 0.0,
         }
     }
 
@@ -1232,6 +1385,7 @@ mod tests {
         let sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         assert!(sim.mobs.is_empty());
         assert!(sim.players.is_empty());
@@ -1243,6 +1397,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         {
@@ -1271,8 +1426,8 @@ mod tests {
             let dz = mob.z - player.z;
             let distance = (dx * dx + dz * dz).sqrt();
             trace.push(format!(
-                "tick={tick:03} player=({:.2},{:.2},{:.2}) hp={:.1} mob=({:.2},{:.2},{:.2}) dist={distance:.2} hit_cd={:.2}",
-                player.x, player.y, player.z, player.hp, mob.x, mob.y, mob.z, mob.hit_cd
+                "tick={tick:03} player=({:.2},{:.2},{:.2}) hp={:.1} mob=({:.2},{:.2},{:.2}) dist={distance:.2} melee_cd={:.2}",
+                player.x, player.y, player.z, player.hp, mob.x, mob.y, mob.z, mob.melee_cd
             ));
             if sim.deaths_this_tick.contains(&player_id) {
                 died = true;
@@ -1292,6 +1447,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (viewer_id, _) = sim
             .join_player("viewer".to_string())
@@ -1397,6 +1553,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         let player = sim.players.get_mut(&player_id).expect("player exists");
@@ -1423,6 +1580,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (player_id, _) = sim.join_player("collector".to_string()).expect("join succeeds");
         let shield_pickup = sim
@@ -1472,6 +1630,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (player_id, _) = sim.join_player("hero".to_string()).expect("join succeeds");
         let input = InputCommand {
@@ -1504,6 +1663,7 @@ mod tests {
         let mut sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
+            spawn_world_bosses: false,
         });
         let (attacker_id, _) = sim
             .join_player("attacker".to_string())

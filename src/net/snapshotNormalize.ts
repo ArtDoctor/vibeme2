@@ -1,4 +1,9 @@
-import { MOB_HP, TRAINING_DUMMY_HP } from "../combat/constants";
+import {
+  BOSS_SUMMONER_HP,
+  BOSS_TANK_HP,
+  MOB_HP,
+  TRAINING_DUMMY_HP,
+} from "../combat/constants";
 import type {
   ArmorPieceKind,
   ArmorSlots,
@@ -79,6 +84,7 @@ function normalizeInventoryItemKind(raw: unknown): InventoryItemKind {
     case "scoutHelm":
     case "scoutChest":
     case "scoutLegs":
+    case "gearUpgradeToken":
       return raw;
     default:
       return "woodenSword";
@@ -109,7 +115,7 @@ function normalizeInventoryEntry(raw: unknown): InventoryEntry {
 }
 
 function normalizePickupKind(raw: unknown): PickupKind {
-  if (raw === "bow" || raw === "armor") {
+  if (raw === "bow" || raw === "armor" || raw === "gold" || raw === "gearToken") {
     return raw;
   }
   return "shield";
@@ -152,7 +158,27 @@ export function normalizeSnapshotPlayer(raw: unknown): SnapshotPlayer {
 }
 
 function mobKind(v: unknown): MobKind {
-  return v === "trainingDummy" ? "trainingDummy" : "creep";
+  if (
+    v === "trainingDummy" ||
+    v === "bossTank" ||
+    v === "bossSummoner"
+  ) {
+    return v;
+  }
+  return "creep";
+}
+
+function defaultMaxHpForMobKind(kind: MobKind): number {
+  switch (kind) {
+    case "trainingDummy":
+      return TRAINING_DUMMY_HP;
+    case "bossTank":
+      return BOSS_TANK_HP;
+    case "bossSummoner":
+      return BOSS_SUMMONER_HP;
+    default:
+      return MOB_HP;
+  }
 }
 
 export function normalizeSnapshotMob(raw: unknown): SnapshotMob {
@@ -162,7 +188,7 @@ export function normalizeSnapshotMob(raw: unknown): SnapshotMob {
       : {};
 
   const kind = mobKind(o.kind);
-  const defaultMax = kind === "trainingDummy" ? TRAINING_DUMMY_HP : MOB_HP;
+  const defaultMax = defaultMaxHpForMobKind(kind);
   return {
     id: Math.max(0, Math.floor(num(o.id, 0))),
     x: num(o.x, 0),
@@ -209,12 +235,15 @@ export function normalizeSnapshotPickup(raw: unknown): SnapshotPickup {
     raw !== null && typeof raw === "object"
       ? (raw as Record<string, unknown>)
       : {};
+  const kind = normalizePickupKind(o.kind);
+  const goldRaw = num(o.goldAmount, 0);
   return {
     id: Math.max(0, Math.floor(num(o.id, 0))),
-    kind: normalizePickupKind(o.kind),
+    kind,
     x: num(o.x, 0),
     y: num(o.y, 0),
     z: num(o.z, 0),
+    ...(kind === "gold" && goldRaw > 0 ? { goldAmount: Math.floor(goldRaw) } : {}),
   };
 }
 

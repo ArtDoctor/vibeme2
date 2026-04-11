@@ -11,6 +11,8 @@ pub enum InventoryItemKind {
     ScoutHelm,
     ScoutChest,
     ScoutLegs,
+    /// Rare boss drop; spend at shops in Milestone 4.
+    GearUpgradeToken,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -40,6 +42,8 @@ pub enum PickupKind {
     Shield,
     Bow,
     Armor,
+    Gold,
+    GearToken,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]

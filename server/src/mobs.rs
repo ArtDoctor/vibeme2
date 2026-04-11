@@ -1,12 +1,12 @@
-//! Small ambient mobs: spawn outside the spawn safe zone, cannot enter it, and do not
-//! pursue or damage players who are inside the safe zone.
+//! Mobs: Milestone 3 AI — idle / chase / telegraphed attack, aggro + chained pull, safe-zone rules.
+//! Bosses: tank (slow heavy projectile), summoner (spawn adds). Authoritative HP lives here + `sim`.
 
 use uuid::Uuid;
 
 use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone};
 use crate::world::{
     hash2, resolve_colliders_entity, sample_terrain_height, snap_to_ground_with_eye, AabbCollider,
-    SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
+    BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z, SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
 };
 
 pub const MOB_RADIUS: f64 = 0.28;
@@ -14,19 +14,61 @@ pub const MOB_EYE_HEIGHT: f64 = 0.82;
 pub const MOB_HP: f64 = 28.0;
 /// High pool; resets when depleted so the courtyard dummy never despawns.
 pub const TRAINING_DUMMY_HP: f64 = 10_000.0;
+pub const BOSS_TANK_HP: f64 = 900.0;
+pub const BOSS_SUMMONER_HP: f64 = 320.0;
+
 pub const MOB_SPEED: f64 = 3.6;
+pub const MOB_WANDER_SPEED: f64 = 1.15;
+pub const BOSS_TANK_SPEED: f64 = 1.05;
+pub const BOSS_SUMMONER_SPEED: f64 = 2.85;
+
 pub const MOB_DAMAGE: f64 = 7.0;
-pub const MOB_HIT_RANGE: f64 = 0.88;
+/// Seconds of wind-up before melee damage resolves (telegraph).
+pub const MOB_MELEE_WINDUP_S: f64 = 0.38;
+/// Recovery after a swing before another wind-up can start.
+pub const MOB_MELEE_RECOVER_S: f64 = 0.55;
+
+pub const MOB_STRIKE_RANGE: f64 = 0.92;
 pub const MOB_HIT_COOLDOWN_S: f64 = 0.85;
-// The world is much larger now, so keep creep density high enough that players
-// still encounter enemies within the per-view snapshot radius.
-pub const MAX_MOBS: usize = 160;
-pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.5;
+
+/// Base aggro radius (m) for small creeps; bosses use larger values.
+pub const CREEP_AGGRO_BASE: f64 = 10.0;
+pub const BOSS_AGGRO_BASE: f64 = 25.0;
+pub const AGGRO_EXTENDED_MULT: f64 = 1.8;
+/// Chained aggro: fight anchor must be this close (XZ) to this mob.
+pub const CHAIN_ANCHOR_RANGE: f64 = 14.0;
+
+pub const BOSS_SHOOT_CD_S: f64 = 2.65;
+pub const BOSS_SHOOT_WINDUP_S: f64 = 0.45;
+pub const BOSS_SUMMON_CD_S: f64 = 4.2;
+pub const BOSS_SUMMON_WINDUP_S: f64 = 0.35;
+pub const SUMMON_OFFSET: f64 = 2.8;
+
+/// Engagement memory for chained aggro (player recently hit a same-kind mob near this fight).
+pub const ENGAGEMENT_TTL_S: f64 = 4.0;
+
+/// Max creeps on the map at once (bosses + training dummy are not counted).
+/// Chosen so default world content stays under ~200 total mob entities.
+pub const MAX_MOBS: usize = 196;
+/// Passive creep spawns: lower = fills toward [`MAX_MOBS`] faster.
+pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MobKind {
     Creep,
     TrainingDummy,
+    BossTank,
+    BossSummoner,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MobMoveState {
+    Idle,
+    Pursuing,
+    MeleeWindup,
+    MeleeRecover,
+    ShootWindup,
+    SummonWindup,
 }
 
 pub struct Mob {
@@ -36,7 +78,15 @@ pub struct Mob {
     pub y: f64,
     pub z: f64,
     pub hp: f64,
-    pub hit_cd: f64,
+    pub move_state: MobMoveState,
+    pub state_timer: f64,
+    pub aggro: Option<Uuid>,
+    pub wander_yaw: f64,
+    pub wander_timer: f64,
+    pub boss_cd: f64,
+    pub facing_yaw: f64,
+    /// Creep melee: time until another telegraphed swing can start.
+    pub melee_cd: f64,
 }
 
 impl Mob {
@@ -46,11 +96,37 @@ impl Mob {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MobEngagement {
+    pub player: Uuid,
+    pub anchor_x: f64,
+    pub anchor_z: f64,
+    pub kind: MobKind,
+    pub ttl_s: f64,
+}
+
+pub struct BossArrowPlan {
+    pub mob_id: u32,
+    pub tx: f64,
+    pub ty: f64,
+    pub tz: f64,
+}
+
 #[inline]
 pub fn mob_max_hp(m: &Mob) -> f64 {
     match m.kind {
         MobKind::Creep => MOB_HP,
         MobKind::TrainingDummy => TRAINING_DUMMY_HP,
+        MobKind::BossTank => BOSS_TANK_HP,
+        MobKind::BossSummoner => BOSS_SUMMONER_HP,
+    }
+}
+
+fn aggro_base_radius(kind: MobKind) -> f64 {
+    match kind {
+        MobKind::Creep => CREEP_AGGRO_BASE,
+        MobKind::BossTank | MobKind::BossSummoner => BOSS_AGGRO_BASE,
+        MobKind::TrainingDummy => 0.0,
     }
 }
 
@@ -63,7 +139,56 @@ pub fn spawn_training_dummy(id: u32) -> Mob {
         z: 3.1,
         y: 0.0,
         hp: TRAINING_DUMMY_HP,
-        hit_cd: 1_000.0,
+        move_state: MobMoveState::Idle,
+        state_timer: 0.0,
+        aggro: None,
+        wander_yaw: 0.0,
+        wander_timer: 0.0,
+        boss_cd: 0.0,
+        facing_yaw: 0.0,
+        melee_cd: 0.0,
+    };
+    m.sync_y_from_terrain();
+    m
+}
+
+pub fn spawn_boss_tank(id: u32) -> Mob {
+    let mut m = Mob {
+        id,
+        kind: MobKind::BossTank,
+        x: BOSS_TANK_X,
+        z: BOSS_TANK_Z,
+        y: 0.0,
+        hp: BOSS_TANK_HP,
+        move_state: MobMoveState::Idle,
+        state_timer: 0.0,
+        aggro: None,
+        wander_yaw: 0.0,
+        wander_timer: 0.0,
+        boss_cd: BOSS_SHOOT_CD_S * 0.4,
+        facing_yaw: 0.0,
+        melee_cd: 0.0,
+    };
+    m.sync_y_from_terrain();
+    m
+}
+
+pub fn spawn_boss_summoner(id: u32) -> Mob {
+    let mut m = Mob {
+        id,
+        kind: MobKind::BossSummoner,
+        x: BOSS_SUMMONER_X,
+        z: BOSS_SUMMONER_Z,
+        y: 0.0,
+        hp: BOSS_SUMMONER_HP,
+        move_state: MobMoveState::Idle,
+        state_timer: 0.0,
+        aggro: None,
+        wander_yaw: 0.0,
+        wander_timer: 0.0,
+        boss_cd: BOSS_SUMMON_CD_S * 0.5,
+        facing_yaw: 0.0,
+        melee_cd: 0.0,
     };
     m.sync_y_from_terrain();
     m
@@ -72,6 +197,8 @@ pub fn spawn_training_dummy(id: u32) -> Mob {
 pub struct MobPlayerHit {
     pub player: Uuid,
     pub damage: f64,
+    pub mob_x: f64,
+    pub mob_z: f64,
 }
 
 pub fn mob_arrow_hit(ax: f64, ay: f64, az: f64, m: &Mob) -> bool {
@@ -172,7 +299,14 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
             z,
             y: 0.0,
             hp: MOB_HP,
-            hit_cd: MOB_HIT_COOLDOWN_S * 0.5,
+            move_state: MobMoveState::Idle,
+            state_timer: 0.0,
+            aggro: None,
+            wander_yaw: hash2(xf + 3.0, zf) * std::f64::consts::TAU,
+            wander_timer: 1.5 + hash2(zf, xf) * 2.0,
+            boss_cd: 0.0,
+            facing_yaw: 0.0,
+            melee_cd: MOB_HIT_COOLDOWN_S * 0.5,
         };
         m.sync_y_from_terrain();
         extrude_mob_from_spawn_safe_zone(&mut m.x, &mut m.z);
@@ -195,41 +329,161 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
     None
 }
 
-fn nearest_target(mx: f64, mz: f64, players: &[(Uuid, f64, f64, f64)]) -> Option<(f64, f64)> {
-    let mut best: Option<(f64, f64, f64)> = None;
-    for &(_, px, _, pz) in players {
-        let dx = px - mx;
-        let dz = pz - mz;
-        let d2 = dx * dx + dz * dz;
-        match best {
-            None => best = Some((d2, px, pz)),
-            Some((bd, _, _)) if d2 < bd => best = Some((d2, px, pz)),
-            _ => {}
-        }
-    }
-    best.map(|(_, x, z)| (x, z))
+fn dist2_xz(ax: f64, az: f64, bx: f64, bz: f64) -> f64 {
+    let dx = ax - bx;
+    let dz = az - bz;
+    dx * dx + dz * dz
 }
 
+fn pick_aggro_target(
+    mx: f64,
+    mz: f64,
+    kind: MobKind,
+    players: &[(Uuid, f64, f64, f64)],
+    engagements: &[MobEngagement],
+) -> Option<Uuid> {
+    if kind == MobKind::TrainingDummy {
+        return None;
+    }
+    let base = aggro_base_radius(kind);
+    let ext = base * AGGRO_EXTENDED_MULT;
+    let base2 = base * base;
+    let ext2 = ext * ext;
+
+    let mut best: Option<(f64, Uuid)> = None;
+    for &(pid, px, _, pz) in players {
+        if point_in_spawn_safe_zone(px, pz) {
+            continue;
+        }
+        let d2 = dist2_xz(mx, mz, px, pz);
+        let mut ok = false;
+        if d2 <= base2 {
+            ok = true;
+        } else if d2 <= ext2 {
+            for e in engagements {
+                if e.player != pid || e.kind != kind {
+                    continue;
+                }
+                let ad = dist2_xz(mx, mz, e.anchor_x, e.anchor_z);
+                if ad <= CHAIN_ANCHOR_RANGE * CHAIN_ANCHOR_RANGE {
+                    ok = true;
+                    break;
+                }
+            }
+        }
+        if ok {
+            match best {
+                None => best = Some((d2, pid)),
+                Some((bd, _)) if d2 < bd => best = Some((d2, pid)),
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+fn player_by_id<'a>(
+    players: &'a [(Uuid, f64, f64, f64)],
+    id: Uuid,
+) -> Option<(f64, f64, f64)> {
+    players
+        .iter()
+        .find_map(|&(pid, x, y, z)| if pid == id { Some((x, y, z)) } else { None })
+}
+
+fn resolve_physics(mob: &mut Mob, colliders: &[AabbCollider]) {
+    mob.sync_y_from_terrain();
+    extrude_mob_from_spawn_safe_zone(&mut mob.x, &mut mob.z);
+    mob.sync_y_from_terrain();
+    resolve_colliders_entity(
+        &mut mob.x,
+        &mut mob.y,
+        &mut mob.z,
+        colliders,
+        MOB_EYE_HEIGHT,
+        MOB_RADIUS,
+    );
+    snap_to_ground_with_eye(&mut mob.y, mob.x, mob.z, MOB_EYE_HEIGHT);
+    extrude_mob_from_spawn_safe_zone(&mut mob.x, &mut mob.z);
+    mob.sync_y_from_terrain();
+}
+
+fn creep_count(mobs: &[Mob]) -> usize {
+    mobs.iter().filter(|m| m.kind == MobKind::Creep).count()
+}
+
+fn spawn_creep_minion(id: u32, x: f64, z: f64, colliders: &[AabbCollider]) -> Option<Mob> {
+    if !spawn_position_valid(x, z) {
+        return None;
+    }
+    let mut m = Mob {
+        id,
+        kind: MobKind::Creep,
+        x,
+        z,
+        y: 0.0,
+        hp: MOB_HP,
+        move_state: MobMoveState::Idle,
+        state_timer: 0.0,
+        aggro: None,
+        wander_yaw: 0.0,
+        wander_timer: 2.0,
+        boss_cd: 0.0,
+        facing_yaw: 0.0,
+        melee_cd: 0.0,
+    };
+    m.sync_y_from_terrain();
+    extrude_mob_from_spawn_safe_zone(&mut m.x, &mut m.z);
+    m.sync_y_from_terrain();
+    resolve_colliders_entity(
+        &mut m.x,
+        &mut m.y,
+        &mut m.z,
+        colliders,
+        MOB_EYE_HEIGHT,
+        MOB_RADIUS,
+    );
+    snap_to_ground_with_eye(&mut m.y, m.x, m.z, MOB_EYE_HEIGHT);
+    extrude_mob_from_spawn_safe_zone(&mut m.x, &mut m.z);
+    m.sync_y_from_terrain();
+    m.wander_yaw = hash2(m.x + 0.7, m.z - 1.2) * std::f64::consts::TAU;
+    if spawn_position_valid(m.x, m.z) {
+        Some(m)
+    } else {
+        None
+    }
+}
+
+/// Advance mob AI. `pending_arrows` are turned into real arrows in `sim`.
 pub fn tick_mobs(
     mobs: &mut Vec<Mob>,
     players: &[(Uuid, f64, f64, f64)],
+    engagements: &mut Vec<MobEngagement>,
     dt: f64,
     colliders: &[AabbCollider],
     spawn_timer: &mut f64,
     next_id: &mut u32,
     world_tick: u64,
+    pending_arrows: &mut Vec<BossArrowPlan>,
 ) -> Vec<MobPlayerHit> {
     let dt = dt.clamp(0.0, 0.12);
+
+    for e in engagements.iter_mut() {
+        e.ttl_s -= dt;
+    }
+    engagements.retain(|e| e.ttl_s > 0.0);
+
     for m in mobs.iter_mut() {
         if m.kind == MobKind::TrainingDummy && m.hp <= 0.0 {
             m.hp = TRAINING_DUMMY_HP;
         }
     }
     mobs.retain(|m| m.hp > 0.0);
-    *spawn_timer += dt;
-    while *spawn_timer >= SPAWN_ATTEMPT_INTERVAL_S
-        && mobs.iter().filter(|m| m.kind == MobKind::Creep).count() < MAX_MOBS
-    {
+
+    if *spawn_timer >= 0.0 {
+        *spawn_timer += dt;
+    }
+    while *spawn_timer >= SPAWN_ATTEMPT_INTERVAL_S && creep_count(mobs) < MAX_MOBS {
         *spawn_timer -= SPAWN_ATTEMPT_INTERVAL_S;
         if let Some(m) = try_spawn_mob(*next_id, world_tick, colliders) {
             mobs.push(m);
@@ -239,70 +493,360 @@ pub fn tick_mobs(
         }
     }
 
+    let eligible: Vec<(Uuid, f64, f64, f64)> = players.to_vec();
+
     let mut hits: Vec<MobPlayerHit> = Vec::new();
-
-    for mob in mobs.iter_mut() {
-        if mob.kind == MobKind::TrainingDummy {
-            continue;
-        }
-        mob.hit_cd = (mob.hit_cd - dt).max(0.0);
-    }
-
-    let eligible: Vec<(Uuid, f64, f64, f64)> = players
-        .iter()
-        .copied()
-        .filter(|&(_, x, _, z)| !point_in_spawn_safe_zone(x, z))
-        .collect();
+    let mut summoned: Vec<Mob> = Vec::new();
+    let mut creep_pop = creep_count(mobs);
 
     for mob in mobs.iter_mut() {
         if mob.kind == MobKind::TrainingDummy {
             mob.sync_y_from_terrain();
             continue;
         }
-        if let Some((tx, tz)) = nearest_target(mob.x, mob.z, &eligible) {
-            let dx = tx - mob.x;
-            let dz = tz - mob.z;
+
+        mob.boss_cd = (mob.boss_cd - dt).max(0.0);
+
+        let target = pick_aggro_target(mob.x, mob.z, mob.kind, &eligible, engagements);
+        mob.aggro = target;
+
+        match mob.kind {
+            MobKind::Creep => {
+                tick_creep(mob, target, &eligible, dt, colliders, &mut hits);
+            }
+            MobKind::BossTank => {
+                tick_boss_tank(
+                    mob,
+                    target,
+                    &eligible,
+                    dt,
+                    colliders,
+                    pending_arrows,
+                    &mut hits,
+                );
+            }
+            MobKind::BossSummoner => {
+                if let Some(spawned) = tick_boss_summoner(
+                    mob,
+                    target,
+                    &eligible,
+                    dt,
+                    colliders,
+                    creep_pop,
+                    *next_id,
+                    world_tick,
+                ) {
+                    summoned.push(spawned);
+                    creep_pop += 1;
+                    *next_id = next_id.wrapping_add(1);
+                }
+            }
+            MobKind::TrainingDummy => {}
+        }
+    }
+
+    mobs.extend(summoned);
+
+    hits
+}
+
+fn tick_creep(
+    mob: &mut Mob,
+    target: Option<Uuid>,
+    eligible: &[(Uuid, f64, f64, f64)],
+    dt: f64,
+    colliders: &[AabbCollider],
+    hits: &mut Vec<MobPlayerHit>,
+) {
+    mob.melee_cd = (mob.melee_cd - dt).max(0.0);
+    match mob.move_state {
+        MobMoveState::Idle => {
+            if let Some(_pid) = target {
+                mob.move_state = MobMoveState::Pursuing;
+                mob.state_timer = 0.0;
+            } else {
+                mob.wander_timer -= dt;
+                if mob.wander_timer <= 0.0 {
+                    mob.wander_timer = 2.0 + hash2(mob.x, mob.z + f64::from(mob.id)) * 2.5;
+                    mob.wander_yaw = hash2(mob.z, mob.x + 3.0) * std::f64::consts::TAU;
+                }
+                let s = MOB_WANDER_SPEED * dt;
+                mob.x += mob.wander_yaw.sin() * s;
+                mob.z += -mob.wander_yaw.cos() * s;
+                mob.facing_yaw = mob.wander_yaw;
+            }
+        }
+        MobMoveState::Pursuing => {
+            if target.is_none() {
+                mob.move_state = MobMoveState::Idle;
+                mob.state_timer = 0.0;
+                mob.wander_timer = 1.0;
+                return;
+            }
+            let pid = target.expect("checked");
+            let Some((px, _, pz)) = player_by_id(eligible, pid) else {
+                mob.move_state = MobMoveState::Idle;
+                return;
+            };
+            if point_in_spawn_safe_zone(px, pz) {
+                mob.move_state = MobMoveState::Idle;
+                return;
+            }
+            let dx = px - mob.x;
+            let dz = pz - mob.z;
             let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+            mob.facing_yaw = dx.atan2(dz);
+            let d = len;
+            if d <= MOB_STRIKE_RANGE && mob.melee_cd <= 0.0 {
+                mob.move_state = MobMoveState::MeleeWindup;
+                mob.state_timer = MOB_MELEE_WINDUP_S;
+                return;
+            }
             mob.x += (dx / len) * MOB_SPEED * dt;
             mob.z += (dz / len) * MOB_SPEED * dt;
         }
-        mob.sync_y_from_terrain();
-        extrude_mob_from_spawn_safe_zone(&mut mob.x, &mut mob.z);
-        mob.sync_y_from_terrain();
-        resolve_colliders_entity(
-            &mut mob.x,
-            &mut mob.y,
-            &mut mob.z,
-            colliders,
-            MOB_EYE_HEIGHT,
-            MOB_RADIUS,
-        );
-        snap_to_ground_with_eye(&mut mob.y, mob.x, mob.z, MOB_EYE_HEIGHT);
-        extrude_mob_from_spawn_safe_zone(&mut mob.x, &mut mob.z);
-        mob.sync_y_from_terrain();
-    }
-
-    for mob in mobs.iter_mut() {
-        if mob.kind == MobKind::TrainingDummy {
-            continue;
-        }
-        if mob.hit_cd > 0.0 {
-            continue;
-        }
-        for &(pid, px, _, pz) in &eligible {
-            let dx = px - mob.x;
-            let dz = pz - mob.z;
-            if dx * dx + dz * dz > MOB_HIT_RANGE * MOB_HIT_RANGE {
-                continue;
+        MobMoveState::MeleeWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if let Some(pid) = target {
+                    if let Some((px, _, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            let d = dist2_xz(mob.x, mob.z, px, pz).sqrt();
+                            if d <= MOB_STRIKE_RANGE + 0.12 {
+                                hits.push(MobPlayerHit {
+                                    player: pid,
+                                    damage: MOB_DAMAGE,
+                                    mob_x: mob.x,
+                                    mob_z: mob.z,
+                                });
+                            }
+                        }
+                    }
+                }
+                mob.melee_cd = MOB_HIT_COOLDOWN_S;
+                mob.move_state = MobMoveState::MeleeRecover;
+                mob.state_timer = MOB_MELEE_RECOVER_S;
             }
-            mob.hit_cd = MOB_HIT_COOLDOWN_S;
-            hits.push(MobPlayerHit {
-                player: pid,
-                damage: MOB_DAMAGE,
-            });
-            break;
+        }
+        MobMoveState::MeleeRecover => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                mob.move_state = if target.is_some() {
+                    MobMoveState::Pursuing
+                } else {
+                    MobMoveState::Idle
+                };
+            }
+        }
+        _ => {
+            mob.move_state = MobMoveState::Idle;
         }
     }
+    resolve_physics(mob, colliders);
+}
 
-    hits
+fn tick_boss_tank(
+    mob: &mut Mob,
+    target: Option<Uuid>,
+    eligible: &[(Uuid, f64, f64, f64)],
+    dt: f64,
+    colliders: &[AabbCollider],
+    pending_arrows: &mut Vec<BossArrowPlan>,
+    _hits: &mut Vec<MobPlayerHit>,
+) {
+    match mob.move_state {
+        MobMoveState::ShootWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if let Some(pid) = mob.aggro {
+                    if let Some((px, py, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            pending_arrows.push(BossArrowPlan {
+                                mob_id: mob.id,
+                                tx: px,
+                                ty: py,
+                                tz: pz,
+                            });
+                        }
+                    }
+                }
+                mob.boss_cd = BOSS_SHOOT_CD_S;
+                mob.move_state = MobMoveState::Pursuing;
+            }
+        }
+        _ => {
+            if let Some(pid) = target {
+                if let Some((px, _, pz)) = player_by_id(eligible, pid) {
+                    if !point_in_spawn_safe_zone(px, pz) {
+                        let dx = px - mob.x;
+                        let dz = pz - mob.z;
+                        let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+                        mob.facing_yaw = dx.atan2(dz);
+                        mob.x += (dx / len) * BOSS_TANK_SPEED * dt;
+                        mob.z += (dz / len) * BOSS_TANK_SPEED * dt;
+                    }
+                }
+                let _ = pid;
+            }
+            if mob.boss_cd <= 0.0 && target.is_some() && mob.move_state != MobMoveState::ShootWindup {
+                mob.move_state = MobMoveState::ShootWindup;
+                mob.state_timer = BOSS_SHOOT_WINDUP_S;
+            }
+        }
+    }
+    resolve_physics(mob, colliders);
+}
+
+fn tick_boss_summoner(
+    mob: &mut Mob,
+    target: Option<Uuid>,
+    eligible: &[(Uuid, f64, f64, f64)],
+    dt: f64,
+    colliders: &[AabbCollider],
+    creep_pop: usize,
+    next_id: u32,
+    world_tick: u64,
+) -> Option<Mob> {
+    let mut spawned: Option<Mob> = None;
+    match mob.move_state {
+        MobMoveState::SummonWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if creep_pop < MAX_MOBS {
+                    let a = hash2(f64::from(mob.id), world_tick as f64) * std::f64::consts::TAU;
+                    let ox = mob.x + a.cos() * SUMMON_OFFSET;
+                    let oz = mob.z + a.sin() * SUMMON_OFFSET;
+                    spawned = spawn_creep_minion(next_id, ox, oz, colliders);
+                }
+                mob.boss_cd = BOSS_SUMMON_CD_S;
+                mob.move_state = MobMoveState::Pursuing;
+            }
+        }
+        _ => {
+            if let Some(pid) = target {
+                if let Some((px, _, pz)) = player_by_id(eligible, pid) {
+                    if !point_in_spawn_safe_zone(px, pz) {
+                        let dx = px - mob.x;
+                        let dz = pz - mob.z;
+                        let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+                        mob.facing_yaw = dx.atan2(dz);
+                        mob.x += (dx / len) * BOSS_SUMMONER_SPEED * dt;
+                        mob.z += (dz / len) * BOSS_SUMMONER_SPEED * dt;
+                    }
+                }
+            }
+            if mob.boss_cd <= 0.0
+                && target.is_some()
+                && creep_pop < MAX_MOBS
+                && mob.move_state != MobMoveState::SummonWindup
+            {
+                mob.move_state = MobMoveState::SummonWindup;
+                mob.state_timer = BOSS_SUMMON_WINDUP_S;
+            }
+        }
+    }
+    spawned
+}
+
+/// Record chained-aggro anchor when a player damages a mob (server calls this).
+pub fn push_engagement(
+    engagements: &mut Vec<MobEngagement>,
+    player: Uuid,
+    anchor_x: f64,
+    anchor_z: f64,
+    kind: MobKind,
+) {
+    if kind == MobKind::TrainingDummy {
+        return;
+    }
+    engagements.push(MobEngagement {
+        player,
+        anchor_x,
+        anchor_z,
+        kind,
+        ttl_s: ENGAGEMENT_TTL_S,
+    });
+}
+
+/// Gold pile + optional token when a mob dies (not training dummy).
+pub fn loot_for_death(kind: MobKind, id: u32, salt: u64) -> Option<(u32, bool)> {
+    let xf = f64::from(id) + salt as f64 * 0.01;
+    match kind {
+        MobKind::TrainingDummy => None,
+        MobKind::Creep => {
+            let g = 2 + (hash2(xf, 3.0) * 4.0).floor() as u32 % 4;
+            Some((g, false))
+        }
+        MobKind::BossTank => {
+            let g = 45 + (hash2(xf, 8.0) * 36.0).floor() as u32 % 36;
+            let token = hash2(xf + 1.0, 2.0) < 0.28;
+            Some((g, token))
+        }
+        MobKind::BossSummoner => {
+            let g = 28 + (hash2(xf, 1.5) * 29.0).floor() as u32 % 28;
+            let token = hash2(xf + 2.0, 4.0) < 0.22;
+            Some((g, token))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[test]
+    fn loot_creep_gold_in_range() {
+        let (g, token) = loot_for_death(MobKind::Creep, 42, 9).unwrap();
+        assert!((2..=5).contains(&g));
+        assert!(!token);
+    }
+
+    #[test]
+    fn loot_training_dummy_none() {
+        assert!(loot_for_death(MobKind::TrainingDummy, 1, 0).is_none());
+    }
+
+    #[test]
+    fn aggro_safe_zone_player_ignored() {
+        let pid = Uuid::new_v4();
+        let players = vec![(pid, 0.5, 2.0, 0.5)];
+        let eng = Vec::new();
+        let t = pick_aggro_target(20.0, 0.0, MobKind::Creep, &players, &eng);
+        assert!(t.is_none());
+    }
+
+    #[test]
+    fn aggro_extended_requires_chain() {
+        let pid = Uuid::new_v4();
+        // Creep at origin; player 15 m away: outside 10 m base, inside 18 m extended.
+        let players = vec![(pid, 15.0, 2.0, 0.0)];
+        assert!(pick_aggro_target(0.0, 0.0, MobKind::Creep, &players, &[]).is_none());
+        let eng = vec![MobEngagement {
+            player: pid,
+            anchor_x: 2.0,
+            anchor_z: 0.0,
+            kind: MobKind::Creep,
+            ttl_s: 3.0,
+        }];
+        assert_eq!(
+            pick_aggro_target(0.0, 0.0, MobKind::Creep, &players, &eng),
+            Some(pid)
+        );
+    }
+
+    #[test]
+    fn aggro_base_picks_nearest() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let players = vec![
+            (a, 8.0, 2.0, 0.0),
+            (b, 9.0, 2.0, 0.0),
+        ];
+        assert_eq!(
+            pick_aggro_target(0.0, 0.0, MobKind::Creep, &players, &[]),
+            Some(a)
+        );
+    }
 }

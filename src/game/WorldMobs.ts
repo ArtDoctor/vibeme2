@@ -1,21 +1,30 @@
 import {
   BoxGeometry,
+  Group,
   Mesh,
   MeshLambertMaterial,
   PerspectiveCamera,
   Scene,
   Vector3,
 } from "three";
-import type { DamageFloatEvent, SnapshotMob } from "../net/types";
+import {
+  BOSS_SUMMONER_HP,
+  BOSS_TANK_HP,
+  MOB_HP,
+  TRAINING_DUMMY_HP,
+} from "../combat/constants";
+import type { DamageFloatEvent, MobKind, SnapshotMob } from "../net/types";
 
 const CREEP_MAT = new MeshLambertMaterial({ color: 0x8b4513 });
 const DUMMY_MAT = new MeshLambertMaterial({ color: 0x8a8a78 });
+const BOSS_TANK_MAT = new MeshLambertMaterial({ color: 0x4a5a6e });
+const BOSS_SUM_MAT = new MeshLambertMaterial({ color: 0x6b3d6b });
 
 const FLOAT_LIFE_S = 0.85;
 const MOB_BAR_Y = 0.52;
 
 type MobView = {
-  mesh: Mesh;
+  root: Group;
   barOuter: HTMLDivElement;
   barFill: HTMLDivElement;
   hp: number;
@@ -29,6 +38,64 @@ type FloatingDamage = {
   wy: number;
   wz: number;
 };
+
+function defaultMaxHp(kind: MobKind): number {
+  switch (kind) {
+    case "trainingDummy":
+      return TRAINING_DUMMY_HP;
+    case "bossTank":
+      return BOSS_TANK_HP;
+    case "bossSummoner":
+      return BOSS_SUMMONER_HP;
+    default:
+      return MOB_HP;
+  }
+}
+
+function buildMobRig(kind: MobKind): Group {
+  const root = new Group();
+  if (kind === "trainingDummy") {
+    const body = new Mesh(new BoxGeometry(0.5, 0.75, 0.35), DUMMY_MAT);
+    body.position.y = 0.1;
+    root.add(body);
+    return root;
+  }
+  if (kind === "bossTank") {
+    const body = new Mesh(new BoxGeometry(1.15, 1.0, 0.95), BOSS_TANK_MAT);
+    body.position.y = 0.35;
+    root.add(body);
+    const head = new Mesh(new BoxGeometry(0.55, 0.45, 0.5), BOSS_TANK_MAT);
+    head.position.y = 1.05;
+    root.add(head);
+    return root;
+  }
+  if (kind === "bossSummoner") {
+    const body = new Mesh(new BoxGeometry(0.55, 0.65, 0.42), BOSS_SUM_MAT);
+    body.position.y = 0.08;
+    root.add(body);
+    const head = new Mesh(new BoxGeometry(0.38, 0.36, 0.38), BOSS_SUM_MAT);
+    head.position.y = 0.62;
+    root.add(head);
+    const staff = new Mesh(new BoxGeometry(0.08, 0.95, 0.08), BOSS_SUM_MAT);
+    staff.position.set(0.38, 0.45, 0);
+    root.add(staff);
+    return root;
+  }
+  // Small creep: torso + head + limbs (matches Milestone 3 "3–4 boxes").
+  const torso = new Mesh(new BoxGeometry(0.34, 0.42, 0.22), CREEP_MAT);
+  torso.position.y = 0.05;
+  root.add(torso);
+  const head = new Mesh(new BoxGeometry(0.26, 0.24, 0.24), CREEP_MAT);
+  head.position.y = 0.42;
+  root.add(head);
+  const legL = new Mesh(new BoxGeometry(0.12, 0.22, 0.12), CREEP_MAT);
+  legL.position.set(-0.1, -0.22, 0);
+  root.add(legL);
+  const legR = new Mesh(new BoxGeometry(0.12, 0.22, 0.12), CREEP_MAT);
+  legR.position.set(0.1, -0.22, 0);
+  root.add(legR);
+  return root;
+}
 
 /**
  * Server-driven mob meshes plus screen-space HP bars and local damage floats.
@@ -62,28 +129,39 @@ export class WorldMobs {
     for (const m of mobs) {
       seen.add(m.id);
       let view = this.byId.get(m.id);
-      if (!view) {
-        const mat = m.kind === "trainingDummy" ? DUMMY_MAT : CREEP_MAT;
-        const mesh = new Mesh(new BoxGeometry(0.45, 0.55, 0.45), mat);
-        mesh.castShadow = false;
+      if (!view || view.root.userData.kindTag !== m.kind) {
+        if (view) {
+          this.scene.remove(view.root);
+          disposeGroup(view.root);
+          view.barOuter.remove();
+        }
+        const root = buildMobRig(m.kind);
+        root.userData.kindTag = m.kind;
         const barOuter = document.createElement("div");
         barOuter.className = "mob-hp-bar-outer";
         const barFill = document.createElement("div");
         barFill.className = "mob-hp-bar-fill";
         barOuter.appendChild(barFill);
         this.overlay.appendChild(barOuter);
-        view = { mesh, barOuter, barFill, hp: m.hp, maxHp: m.maxHp };
+        view = {
+          root,
+          barOuter,
+          barFill,
+          hp: m.hp,
+          maxHp: m.maxHp > 0 ? m.maxHp : defaultMaxHp(m.kind),
+        };
         this.byId.set(m.id, view);
-        this.scene.add(mesh);
+        this.scene.add(root);
       }
       view.hp = m.hp;
-      view.maxHp = Math.max(1e-6, m.maxHp);
-      view.mesh.position.set(m.x, m.y - 0.2, m.z);
+      view.maxHp = m.maxHp > 0 ? m.maxHp : defaultMaxHp(m.kind);
+      view.root.position.set(m.x, m.y - 0.2, m.z);
+      view.root.rotation.y = 0;
     }
     for (const [id, view] of this.byId) {
       if (!seen.has(id)) {
-        this.scene.remove(view.mesh);
-        view.mesh.geometry.dispose();
+        this.scene.remove(view.root);
+        disposeGroup(view.root);
         view.barOuter.remove();
         this.byId.delete(id);
       }
@@ -121,7 +199,7 @@ export class WorldMobs {
     }
 
     for (const view of this.byId.values()) {
-      const m = view.mesh;
+      const m = view.root;
       const sp = this.worldToOverlay(
         m.position.x,
         m.position.y + MOB_BAR_Y,
@@ -146,8 +224,8 @@ export class WorldMobs {
     }
     this.floats.length = 0;
     for (const view of this.byId.values()) {
-      this.scene.remove(view.mesh);
-      view.mesh.geometry.dispose();
+      this.scene.remove(view.root);
+      disposeGroup(view.root);
       view.barOuter.remove();
     }
     this.byId.clear();
@@ -185,5 +263,13 @@ export class WorldMobs {
     const left = (this.scratch.x * 0.5 + 0.5) * rect.width;
     const top = (this.scratch.y * -0.5 + 0.5) * rect.height;
     return { left, top };
+  }
+}
+
+function disposeGroup(root: Group): void {
+  for (const child of root.children) {
+    if (child instanceof Mesh) {
+      child.geometry.dispose();
+    }
   }
 }
