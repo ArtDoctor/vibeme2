@@ -90,6 +90,7 @@ export class FirstPersonControls {
   private readonly scratchUp = new Vector3(0, 1, 0);
   private readonly scratchShake = new Vector3();
   private thirdPerson = false;
+  private thirdPersonBeforeDeath = false;
   /** Death / revive UI: orbit camera on frozen pose, no movement look. */
   private deathCameraActive = false;
   private deathCameraElapsed = 0;
@@ -160,6 +161,48 @@ export class FirstPersonControls {
     this.state.onGround = true;
   }
 
+  /** Hard-set the local eye pose from the authoritative server snapshot. */
+  syncAuthoritativePose(pose: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    pitch: number;
+  }): void {
+    this.eyePosition.set(pose.x, pose.y, pose.z);
+    this.velocity.set(0, 0, 0);
+    this.state.velocity.x = 0;
+    this.state.velocity.y = 0;
+    this.state.velocity.z = 0;
+    this.state.onGround = true;
+    this.camera.rotation.order = "YXZ";
+    this.camera.rotation.x = pose.pitch;
+    this.camera.rotation.y = pose.yaw;
+    this.camera.rotation.z = 0;
+    this.applyCameraView();
+  }
+
+  /** Pull local prediction back to server truth when drift grows too large. */
+  reconcileAuthoritativePose(
+    pose: {
+      x: number;
+      y: number;
+      z: number;
+      yaw: number;
+      pitch: number;
+    },
+    maxPositionError = 1.25,
+  ): boolean {
+    const dx = this.eyePosition.x - pose.x;
+    const dy = this.eyePosition.y - pose.y;
+    const dz = this.eyePosition.z - pose.z;
+    if (dx * dx + dy * dy + dz * dz <= maxPositionError * maxPositionError) {
+      return false;
+    }
+    this.syncAuthoritativePose(pose);
+    return true;
+  }
+
   /** When true, the camera is offset behind the eye for a third-person view. */
   get isThirdPerson(): boolean {
     return this.thirdPerson;
@@ -176,6 +219,7 @@ export class FirstPersonControls {
 
   /** Death UI: orbit camera, freeze controls separately from chat suppression. */
   beginDeathCamera(): void {
+    this.thirdPersonBeforeDeath = this.thirdPerson;
     this.deathCameraActive = true;
     this.deathCameraElapsed = 0;
     this.thirdPerson = true;
@@ -184,6 +228,7 @@ export class FirstPersonControls {
   endDeathCamera(): void {
     this.deathCameraActive = false;
     this.deathCameraElapsed = 0;
+    this.thirdPerson = this.thirdPersonBeforeDeath;
     if (this.camera instanceof PerspectiveCamera) {
       this.camera.fov = this.baseFov;
       this.camera.updateProjectionMatrix();

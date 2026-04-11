@@ -358,6 +358,14 @@ export class Game {
       this.combatInput?.setDeathLocked(true);
     }
 
+    if (this.localPlayerSnapshot !== null) {
+      if (prevSnap === null) {
+        this.controls.syncAuthoritativePose(this.localPlayerSnapshot);
+      } else if (!this.deathUiActive) {
+        this.controls.reconcileAuthoritativePose(this.localPlayerSnapshot);
+      }
+    }
+
     if (this.localPlayerSnapshot) {
       this.combatInput?.syncFromSnapshot(this.localPlayerSnapshot);
     }
@@ -379,6 +387,21 @@ export class Game {
         me.hp,
         msg.damageFloats,
       );
+    }
+  }
+
+  revive(): void {
+    if (this.disposed) return;
+    this.deathUiActive = false;
+    this.deathRigSnapshot = null;
+    this.controls.endDeathCamera();
+    if (this.localPlayerSnapshot !== null) {
+      this.controls.syncAuthoritativePose(this.localPlayerSnapshot);
+    }
+    this.controls.setInputSuppressed(false);
+    this.combatInput?.setDeathLocked(false);
+    if (this.localPlayerSnapshot !== null) {
+      this.combatInput?.syncFromSnapshot(this.localPlayerSnapshot);
     }
   }
 

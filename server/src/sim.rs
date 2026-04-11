@@ -23,7 +23,7 @@ use crate::items::{
 use crate::mobs::{
     loot_for_death, mob_arrow_hit, mob_max_hp, push_engagement, seed_passive_creeps,
     spawn_boss_summoner, spawn_boss_tank, spawn_training_dummy, tick_mobs, BossArrowPlan, Mob,
-    MobEngagement, MobKind, MobPlayerHit, TRAINING_DUMMY_HP,
+    MobEngagement, MobKind, MobPlayerHit, MAX_MOBS, TRAINING_DUMMY_HP,
 };
 use crate::team::Team;
 use crate::validate::clamp_claimed_position;
@@ -37,7 +37,7 @@ use crate::world::{
 /// Must stay below typical fog/render distance so avatars match what you can see.
 /// The money leaderboard is global, so this should be large enough that "on the list"
 /// does not imply "in another bubble" during normal play.
-const PLAYER_VISIBILITY_RADIUS: f64 = 220.0;
+const PLAYER_VISIBILITY_RADIUS: f64 = crate::world::TERRAIN_HALF_SIZE * 3.0;
 const MOB_VISIBILITY_RADIUS: f64 = 70.0;
 const ARROW_VISIBILITY_RADIUS: f64 = 75.0;
 const DAMAGE_EVENT_VISIBILITY_RADIUS: f64 = 80.0;
@@ -873,12 +873,11 @@ impl Simulation {
         if !self.config.auto_spawn_creeps {
             return;
         }
-        const TARGET_BOOT_CREEPS: usize = 24;
         seed_passive_creeps(
             &mut self.mobs,
             &mut self.next_mob_id,
             colliders,
-            TARGET_BOOT_CREEPS,
+            MAX_MOBS,
         );
     }
 
@@ -2045,7 +2044,7 @@ mod tests {
         }
         {
             let far = sim.players.get_mut(&far_id).expect("far player exists");
-            far.x = 300.0;
+            far.x = 2_000.0;
             far.z = 0.0;
             far.y = sample_terrain_height(far.x, far.z) + EYE_HEIGHT;
         }
@@ -2120,6 +2119,34 @@ mod tests {
             "viewer should keep their own damage event even when it happened far away"
         );
         assert_eq!(view.damage_floats[0].source_id, viewer_id.to_string());
+    }
+
+    #[test]
+    fn snapshot_frame_keeps_players_visible_across_team_spawns() {
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (red_id, _, _) = sim.join_player("red".to_string(), Team::Red).expect("join");
+        let (blue_id, _, _) = sim.join_player("blue".to_string(), Team::Blue).expect("join");
+
+        let frame = sim.build_snapshot_frame(7);
+        let red_view = frame.for_viewer(red_id);
+
+        assert!(
+            red_view
+                .players
+                .iter()
+                .any(|player| player.id == red_id.to_string())
+        );
+        assert!(
+            red_view
+                .players
+                .iter()
+                .any(|player| player.id == blue_id.to_string()),
+            "team castles should still replicate players to each other"
+        );
     }
 
     #[test]
@@ -2220,8 +2247,8 @@ mod tests {
         sim.seed_passive_creeps_at_boot(&colliders);
         let creeps = sim.mobs.iter().filter(|m| m.kind == MobKind::Creep).count();
         assert!(
-            creeps >= 20,
-            "expected boot seed to populate passive creeps immediately, got {creeps}"
+            creeps == MAX_MOBS,
+            "expected boot seed to fully populate passive creeps immediately, got {creeps}"
         );
     }
 

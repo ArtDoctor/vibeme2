@@ -1,7 +1,8 @@
 import type { PlayerTeam, SnapshotMsg, WelcomeMsg } from "./types";
 import { normalizeSnapshotMsg } from "./snapshotNormalize";
 
-const DEFAULT_SESSION_KEY = "solis-gladius.session";
+const DEFAULT_SESSION_KEY = "vibeme2.session";
+const LEGACY_SESSION_KEY = "solis-gladius.session";
 
 function wsUrlFromPage(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -235,7 +236,10 @@ export class MultiplayerClient {
 
 export function readStoredSession(): string | null {
   try {
-    return window.localStorage.getItem(DEFAULT_SESSION_KEY);
+    return (
+      window.localStorage.getItem(DEFAULT_SESSION_KEY) ??
+      window.localStorage.getItem(LEGACY_SESSION_KEY)
+    );
   } catch {
     return null;
   }
@@ -244,6 +248,7 @@ export function readStoredSession(): string | null {
 export function clearStoredSession(): void {
   try {
     window.localStorage.removeItem(DEFAULT_SESSION_KEY);
+    window.localStorage.removeItem(LEGACY_SESSION_KEY);
   } catch {
     /* private mode / blocked */
   }

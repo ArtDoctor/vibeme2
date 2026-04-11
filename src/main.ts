@@ -208,8 +208,8 @@ if (joinNickname instanceof HTMLInputElement) {
 
 if (deathRevive instanceof HTMLButtonElement) {
   deathRevive.addEventListener("click", () => {
-    clearStoredSession();
-    void startMultiplayer({ freshSession: true });
+    hideDeathPanel();
+    game?.revive();
   });
 }
 
