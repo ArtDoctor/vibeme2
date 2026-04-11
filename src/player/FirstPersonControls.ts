@@ -196,8 +196,21 @@ export class FirstPersonControls {
     const dx = this.eyePosition.x - pose.x;
     const dy = this.eyePosition.y - pose.y;
     const dz = this.eyePosition.z - pose.z;
-    if (dx * dx + dy * dy + dz * dz <= maxPositionError * maxPositionError) {
+    const errorSq = dx * dx + dy * dy + dz * dz;
+    if (errorSq <= maxPositionError * maxPositionError) {
       return false;
+    }
+    // Preserve the current look direction for ordinary movement corrections so a
+    // late authoritative position update does not visibly tug the camera yaw.
+    if (errorSq <= 36.0) {
+      this.eyePosition.set(pose.x, pose.y, pose.z);
+      this.velocity.set(0, 0, 0);
+      this.state.velocity.x = 0;
+      this.state.velocity.y = 0;
+      this.state.velocity.z = 0;
+      this.state.onGround = true;
+      this.applyCameraView();
+      return true;
     }
     this.syncAuthoritativePose(pose);
     return true;

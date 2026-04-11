@@ -183,6 +183,7 @@ export class Game {
   private readonly leaderboardNextBtn?: HTMLButtonElement;
   private hudVisibility = loadHudVisibilitySettings();
   private moneyLeaderboardRows: readonly MoneyLeaderboardEntry[] = [];
+  private shopRenderKey: string | null = null;
   private deathUiActive = false;
   private pauseOpen = false;
   private chatComposeOpen = false;
@@ -736,7 +737,7 @@ export class Game {
     if (stFill) stFill.style.width = `${Math.max(0, Math.min(100, me.stamina))}%`;
 
     if (this.shopOpen && this.shopPanel && this.shopAtIndex !== null) {
-      this.renderShopOffers(me, this.shopAtIndex);
+      this.maybeRenderShopOffers(me, this.shopAtIndex);
     }
 
     if (
@@ -760,18 +761,27 @@ export class Game {
     if (near === null) return;
     this.shopAtIndex = near.index;
     this.shopOpen = true;
+    this.shopRenderKey = null;
     this.shopPanel.classList.remove("hidden");
     this.applyInputSuppression();
     void document.exitPointerLock();
     const me = this.localPlayerSnapshot;
-    if (me) this.renderShopOffers(me, this.shopAtIndex);
+    if (me) this.maybeRenderShopOffers(me, this.shopAtIndex);
   }
 
   private closeShopPanel(): void {
     this.shopOpen = false;
     this.shopAtIndex = null;
+    this.shopRenderKey = null;
     this.shopPanel?.classList.add("hidden");
     this.applyInputSuppression();
+  }
+
+  private maybeRenderShopOffers(me: SnapshotPlayer, shopIndex: number): void {
+    const nextKey = shopRenderKey(me, shopIndex);
+    if (this.shopRenderKey === nextKey) return;
+    this.shopRenderKey = nextKey;
+    this.renderShopOffers(me, shopIndex);
   }
 
   private renderShopOffers(me: SnapshotPlayer, shopIndex: number): void {
@@ -1207,4 +1217,12 @@ function formatMainHandLabel(k: SnapshotPlayer["mainHand"]): string {
     default:
       return "wooden sword";
   }
+}
+
+function shopRenderKey(me: SnapshotPlayer, shopIndex: number): string {
+  const inventory = me.inventory
+    .map((entry) => `${entry.kind}:${entry.count}`)
+    .sort()
+    .join("|");
+  return `${shopIndex}/${me.gold}/${me.bossUnlock ? 1 : 0}/${inventory}`;
 }

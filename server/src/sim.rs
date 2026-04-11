@@ -49,6 +49,7 @@ const CHAT_PROXIMITY_RADIUS: f64 = 36.0;
 const CHAT_MAX_CHARS: usize = 160;
 const CHAT_TTL: Duration = Duration::from_secs(60);
 const CHAT_MIN_INTERVAL: Duration = Duration::from_millis(900);
+const CREATIVE_MODE_GOLD: u32 = 9_999;
 const STAMINA_SPRINT_PER_S: f64 = 26.0;
 const SAFE_ZONE_REGEN_HP_PER_S: f64 = 10.0;
 
@@ -1139,6 +1140,9 @@ impl Simulation {
             let Some(player) = self.players.get_mut(&player_id) else {
                 return false;
             };
+            if input.creative && player.gold < CREATIVE_MODE_GOLD {
+                player.gold = CREATIVE_MODE_GOLD;
+            }
             let prev = (player.x, player.y, player.z);
             let flying = input.creative && input.flying;
             let (mut next_x, mut next_y, mut next_z) = clamp_claimed_position(
@@ -2013,6 +2017,22 @@ mod tests {
         }
     }
 
+    fn empty_sim() -> Simulation {
+        Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        })
+    }
+
+    fn position_player_at_shop(sim: &mut Simulation, player_id: uuid::Uuid, shop_index: usize) {
+        let (x, z) = safe_zone_shop_spot_xz(shop_index).expect("shop spot");
+        let player = sim.players.get_mut(&player_id).expect("player exists");
+        player.x = x;
+        player.z = z;
+        player.y = sample_terrain_height(x, z) + EYE_HEIGHT;
+    }
+
     #[test]
     fn empty_world_starts_without_boot_content() {
         let sim = Simulation::new(SimConfig {
@@ -2484,12 +2504,9 @@ mod tests {
 
     #[test]
     fn shop_buy_equips_purchased_gear() {
-        let mut sim = Simulation::new(SimConfig {
-            spawn_training_dummy: false,
-            auto_spawn_creeps: false,
-            spawn_world_bosses: false,
-        });
+        let mut sim = empty_sim();
         let (player_id, _, _) = sim.join_player("buyer".to_string(), Team::Red).expect("join");
+        position_player_at_shop(&mut sim, player_id, crate::world::TEAM_RED_SAFE_ZONE_INDEX);
         {
             let player = sim.players.get_mut(&player_id).expect("player exists");
             player.gold = 120;
@@ -2509,13 +2526,89 @@ mod tests {
     }
 
     #[test]
+    fn creative_gold_can_be_spent_at_a_shop() {
+        let colliders = build_colliders();
+        let mut sim = empty_sim();
+        let (player_id, _, team) = sim
+            .join_player("builder".to_string(), Team::Neutral)
+            .expect("join");
+        let (x, y, z) = spawn_pose_for_team(team);
+        let input = InputCommand {
+            x,
+            y,
+            z,
+            yaw: 0.0,
+            pitch: 0.0,
+            creative: true,
+            flying: false,
+            sprinting: false,
+            main_hand: None,
+            off_hand: None,
+            blocking: false,
+            bow_charge: 0.0,
+            swing: false,
+            fire_arrow: false,
+        };
+        assert!(sim.apply_input(player_id, &input, 0.05, &colliders));
+        position_player_at_shop(&mut sim, player_id, crate::world::TEAM_NEUTRAL_SAFE_ZONE_INDEX);
+
+        sim.shop_buy(player_id, crate::world::TEAM_NEUTRAL_SAFE_ZONE_INDEX, "ironSword")
+            .expect("creative gold should buy shop gear");
+
+        let player = sim.players.get(&player_id).expect("player exists");
+        assert_eq!(player.gold, CREATIVE_MODE_GOLD - 42);
+        assert_eq!(player.equipment.main_hand, MainHandKind::IronSword);
+        assert!(player.inventory.has(InventoryItemKind::IronSword));
+    }
+
+    #[test]
+    fn every_shop_offer_can_be_bought_from_matching_catalog() {
+        let mut sim = empty_sim();
+        let scenarios = [
+            (crate::world::TEAM_RED_SAFE_ZONE_INDEX, SHOP_OFFERS_BASIC),
+            (2_usize, SHOP_OFFERS_ADVANCED),
+        ];
+        let mut next_buyer = 0_u32;
+
+        for (shop_index, offers) in scenarios {
+            for offer in offers {
+                let nickname = format!("b{next_buyer}");
+                next_buyer += 1;
+                let (player_id, _, _) = sim.join_player(nickname, Team::Neutral).expect("join");
+                position_player_at_shop(&mut sim, player_id, shop_index);
+                {
+                    let player = sim.players.get_mut(&player_id).expect("player exists");
+                    player.gold = 10_000;
+                    player.boss_unlock = true;
+                }
+
+                sim.shop_buy(player_id, shop_index, offer.sku).unwrap_or_else(|err| {
+                    panic!(
+                        "offer {} at shop {} should buy successfully: {}",
+                        offer.sku, shop_index, err
+                    )
+                });
+
+                let player = sim.players.get(&player_id).expect("player exists");
+                assert!(
+                    player.inventory.has(offer.item),
+                    "expected inventory to contain {}",
+                    offer.sku
+                );
+                assert_eq!(
+                    player.gold,
+                    10_000 - offer.price,
+                    "expected {} to spend the matching price",
+                    offer.sku
+                );
+            }
+        }
+    }
+
+    #[test]
     fn sprinting_drains_stamina_and_safe_zone_regens_hp() {
         let colliders = build_colliders();
-        let mut sim = Simulation::new(SimConfig {
-            spawn_training_dummy: false,
-            auto_spawn_creeps: false,
-            spawn_world_bosses: false,
-        });
+        let mut sim = empty_sim();
         let (player_id, _, team) = sim.join_player("runner".to_string(), Team::Blue).expect("join");
         let (x, y, z) = spawn_pose_for_team(team);
         {
@@ -2549,6 +2642,40 @@ mod tests {
         let player = sim.players.get(&player_id).expect("player exists");
         assert!(player.stamina < 70.0, "expected sprinting to spend stamina");
         assert!(player.hp > 55.0, "expected safe-zone regen to heal hp");
+    }
+
+    #[test]
+    fn creative_input_grants_9999_gold() {
+        let colliders = build_colliders();
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (player_id, _, team) =
+            sim.join_player("builder".to_string(), Team::Neutral).expect("join");
+        let (x, y, z) = spawn_pose_for_team(team);
+        let input = InputCommand {
+            x,
+            y,
+            z,
+            yaw: 0.0,
+            pitch: 0.0,
+            creative: true,
+            flying: false,
+            sprinting: false,
+            main_hand: None,
+            off_hand: None,
+            blocking: false,
+            bow_charge: 0.0,
+            swing: false,
+            fire_arrow: false,
+        };
+
+        assert!(sim.apply_input(player_id, &input, 0.05, &colliders));
+
+        let player = sim.players.get(&player_id).expect("player exists");
+        assert_eq!(player.gold, CREATIVE_MODE_GOLD);
     }
 
     #[test]

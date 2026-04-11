@@ -8,6 +8,7 @@ const MOVE_SPEED: f64 = 3.75;
 const CREATIVE_MOVE_SPEED: f64 = 22.5;
 const SPEED_BOOST_MULTIPLIER: f64 = 3.0;
 const MAX_VERTICAL_SPEED: f64 = 28.0;
+const MIN_INPUT_DT_SECS: f64 = 1.0 / 45.0;
 
 pub fn clamp_claimed_position(
     prev: (f64, f64, f64),
@@ -18,10 +19,12 @@ pub fn clamp_claimed_position(
     flying: bool,
     sprinting: bool,
 ) -> (f64, f64, f64) {
-    let dt = dt_secs.clamp(0.0, 0.25);
-    if dt <= 0.0 {
+    if dt_secs <= 0.0 {
         return prev;
     }
+    // Small socket jitter can make consecutive packets arrive much faster than the
+    // nominal client send cadence, which otherwise causes needless clamp/correct cycles.
+    let dt = dt_secs.clamp(MIN_INPUT_DT_SECS, 0.25);
     let flying = creative && flying;
     let speed_multiplier = if sprinting {
         SPEED_BOOST_MULTIPLIER
@@ -115,5 +118,19 @@ mod tests {
         let flying = clamp_claimed_position(prev, claimed, 0.05, &colliders, true, true, false);
         assert!(grounded.1 <= gy + EYE_HEIGHT + 1e-9);
         assert!(flying.1 > grounded.1 + 0.01, "grounded={} flying={}", grounded.1, flying.1);
+    }
+
+    #[test]
+    fn tiny_input_jitter_does_not_overclamp_legit_sprint_step() {
+        let colliders = build_colliders();
+        let gy = sample_terrain_height(0.0, 0.0);
+        let prev = (0.0, gy + EYE_HEIGHT, 0.0);
+        let claimed = (0.32, prev.1, 0.0);
+        let out = clamp_claimed_position(prev, claimed, 0.008, &colliders, false, false, true);
+        assert!(
+            out.0 > 0.24,
+            "expected jitter floor to keep most of the sprint step, got {}",
+            out.0
+        );
     }
 }
