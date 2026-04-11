@@ -49,9 +49,9 @@ pub fn safe_zone_index_at(x: f64, z: f64) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Shortest distance from `(x,z)` to any spawn safe AABB edge. `0` when inside a courtyard
-/// (including boundary); positive in open **chaos** desert — used to bias passive creep spawns
-/// away from castles (Milestone 7).
+/// Shortest distance from `(x,z)` to any spawn safe AABB edge. `0` inside a courtyard; positive
+/// in open desert (used by unit tests; passive creeps sample uniformly instead of biasing on this).
+#[allow(dead_code)]
 #[inline]
 pub fn min_distance_to_any_spawn_safe_aabb(x: f64, z: f64) -> f64 {
     let mut best = f64::MAX;

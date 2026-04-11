@@ -1,0 +1,13 @@
+[
+  {
+    "key": "enter",
+    "command": "runCommands",
+    "args": {
+      "commands": [
+        "workbench.action.chat.submit",
+        "workbench.action.focusActiveEditorGroup"
+      ]
+    },
+    "when": "inChatInput || composerInputFocus"
+  }
+]

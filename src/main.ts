@@ -5,7 +5,7 @@ import {
   MultiplayerClient,
   readStoredSession,
 } from "./net/multiplayer";
-import type { PlayerTeam } from "./net/types";
+import type { PlayerTeam, SnapshotMsg } from "./net/types";
 
 const canvasEl = document.getElementById("game-canvas");
 if (!(canvasEl instanceof HTMLCanvasElement)) {
@@ -132,18 +132,26 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
   const stored = options?.freshSession ? null : readStoredSession();
   try {
     disposeGame();
+    const pendingSnapshots: SnapshotMsg[] = [];
+    const applySnapshotFromNet = (snap: SnapshotMsg, localPlayerId: string): void => {
+      game?.applyRemoteSnapshot(snap);
+      if (snap.deaths?.includes(localPlayerId)) {
+        if (deathPanelTimer !== undefined) {
+          clearTimeout(deathPanelTimer);
+        }
+        deathPanelTimer = window.setTimeout(() => {
+          showDeathPanel();
+          deathPanelTimer = undefined;
+        }, 1100);
+      }
+    };
     const mp = await MultiplayerClient.connect(
       { nickname, session: stored, team: getSelectedJoinTeam() },
       (snap, localPlayerId) => {
-        game?.applyRemoteSnapshot(snap);
-        if (snap.deaths?.includes(localPlayerId)) {
-          if (deathPanelTimer !== undefined) {
-            clearTimeout(deathPanelTimer);
-          }
-          deathPanelTimer = window.setTimeout(() => {
-            showDeathPanel();
-            deathPanelTimer = undefined;
-          }, 1100);
+        if (game) {
+          applySnapshotFromNet(snap, localPlayerId);
+        } else {
+          pendingSnapshots.push(snap);
         }
       },
     );
@@ -165,6 +173,9 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       isChatBlocked: () =>
         deathPanel !== null && !deathPanel.classList.contains("hidden"),
     });
+    for (const snap of pendingSnapshots) {
+      applySnapshotFromNet(snap, mp.id);
+    }
     game.attachMultiplayer(mp);
     hideJoinPanel();
     hideDeathPanel();

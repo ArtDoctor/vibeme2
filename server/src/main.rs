@@ -52,10 +52,12 @@ async fn main() {
         .init();
 
     let colliders = Arc::new(build_colliders());
+    let mut simulation = Simulation::new(SimConfig::default());
+    simulation.seed_passive_creeps_at_boot(colliders.as_slice());
     let (snap_tx, _) = broadcast::channel::<u64>(64);
     let state = AppState {
         colliders,
-        sim: Arc::new(RwLock::new(Simulation::new(SimConfig::default()))),
+        sim: Arc::new(RwLock::new(simulation)),
         latest_frame: Arc::new(RwLock::new(None)),
         snapshot_ticks: snap_tx.clone(),
     };

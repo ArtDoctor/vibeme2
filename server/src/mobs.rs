@@ -8,9 +8,8 @@ use uuid::Uuid;
 
 use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone, BOSS_ARROW_SPEED};
 use crate::world::{
-    hash2, min_distance_to_any_spawn_safe_aabb, resolve_colliders_entity, sample_terrain_height,
-    snap_to_ground_with_eye, AabbCollider, BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z,
-    SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
+    hash2, resolve_colliders_entity, sample_terrain_height, snap_to_ground_with_eye, AabbCollider,
+    BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z, SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
 };
 
 pub const MOB_RADIUS: f64 = 0.28;
@@ -21,54 +20,60 @@ pub const TRAINING_DUMMY_HP: f64 = 10_000.0;
 pub const BOSS_TANK_HP: f64 = 900.0;
 pub const BOSS_SUMMONER_HP: f64 = 320.0;
 
-pub const MOB_SPEED: f64 = 3.6;
-pub const MOB_WANDER_SPEED: f64 = 1.15;
-pub const BOSS_TANK_SPEED: f64 = 1.05;
-pub const BOSS_SUMMONER_SPEED: f64 = 2.85;
+pub const MOB_SPEED: f64 = 4.35;
+pub const MOB_WANDER_SPEED: f64 = 1.35;
+pub const BOSS_TANK_SPEED: f64 = 1.28;
+pub const BOSS_SUMMONER_SPEED: f64 = 3.2;
 
-pub const MOB_DAMAGE: f64 = 7.0;
+pub const MOB_DAMAGE: f64 = 9.0;
 /// Seconds of wind-up before melee damage resolves (telegraph).
-pub const MOB_MELEE_WINDUP_S: f64 = 0.38;
+pub const MOB_MELEE_WINDUP_S: f64 = 0.30;
 /// Recovery after a swing before another wind-up can start.
-pub const MOB_MELEE_RECOVER_S: f64 = 0.55;
+pub const MOB_MELEE_RECOVER_S: f64 = 0.42;
 
 pub const MOB_STRIKE_RANGE: f64 = 0.92;
-pub const MOB_HIT_COOLDOWN_S: f64 = 0.85;
+pub const MOB_HIT_COOLDOWN_S: f64 = 0.62;
 
 /// Base aggro radius (m) for small creeps; bosses use larger values.
-pub const CREEP_AGGRO_BASE: f64 = 10.0;
-pub const BOSS_AGGRO_BASE: f64 = 25.0;
-pub const AGGRO_EXTENDED_MULT: f64 = 1.8;
+pub const CREEP_AGGRO_BASE: f64 = 15.0;
+pub const BOSS_AGGRO_BASE: f64 = 34.0;
+pub const AGGRO_EXTENDED_MULT: f64 = 2.1;
 /// Chained aggro: fight anchor must be this close (XZ) to this mob.
-pub const CHAIN_ANCHOR_RANGE: f64 = 14.0;
+pub const CHAIN_ANCHOR_RANGE: f64 = 22.0;
 
-pub const BOSS_SHOOT_CD_S: f64 = 2.65;
-pub const BOSS_SHOOT_WINDUP_S: f64 = 0.45;
+pub const BOSS_SHOOT_CD_S: f64 = 2.15;
+pub const BOSS_SHOOT_WINDUP_S: f64 = 0.38;
 /// Quick triple shot; projectiles are non-heavy (shield soft-blocks only).
-pub const BOSS_VOLLEY_WINDUP_S: f64 = 0.32;
-pub const BOSS_VOLLEY_CD_S: f64 = 2.15;
-pub const BOSS_VOLLEY_SPEED: f64 = 34.0;
+pub const BOSS_VOLLEY_WINDUP_S: f64 = 0.26;
+pub const BOSS_VOLLEY_CD_S: f64 = 1.75;
+pub const BOSS_VOLLEY_SPEED: f64 = 38.0;
 pub const BOSS_VOLLEY_SPREAD: f64 = 1.35;
-pub const BOSS_STOMP_WINDUP_S: f64 = 0.58;
-pub const BOSS_STOMP_CD_S: f64 = 2.9;
-pub const BOSS_STOMP_RANGE: f64 = 4.15;
-pub const BOSS_STOMP_DAMAGE: f64 = 32.0;
-pub const BOSS_SUMMON_CD_S: f64 = 4.2;
-pub const BOSS_SUMMON_WINDUP_S: f64 = 0.35;
-pub const BOSS_BOLT_WINDUP_S: f64 = 0.28;
-pub const BOSS_BOLT_CD_S: f64 = 1.85;
+pub const BOSS_STOMP_WINDUP_S: f64 = 0.48;
+pub const BOSS_STOMP_CD_S: f64 = 2.35;
+pub const BOSS_STOMP_RANGE: f64 = 4.35;
+pub const BOSS_STOMP_DAMAGE: f64 = 38.0;
+pub const BOSS_SUMMON_CD_S: f64 = 3.25;
+pub const BOSS_SUMMON_WINDUP_S: f64 = 0.28;
+pub const BOSS_BOLT_WINDUP_S: f64 = 0.22;
+pub const BOSS_BOLT_CD_S: f64 = 1.45;
 pub const BOSS_BOLT_SPEED: f64 = 40.0;
 pub const SUMMON_OFFSET: f64 = 2.8;
 
 /// Engagement memory for chained aggro (player recently hit a same-kind mob near this fight).
-pub const ENGAGEMENT_TTL_S: f64 = 4.0;
+pub const ENGAGEMENT_TTL_S: f64 = 6.0;
 
 /// Max creeps on the map at once (bosses + training dummy are not counted).
 pub const MAX_MOBS: usize = 512;
 /// Passive creep spawns: lower = fills toward [`MAX_MOBS`] faster.
-pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.075;
-/// Random trials per spawn tick; best trial (deepest **chaos** clearance) wins (Milestone 7).
-const CHAOS_SPAWN_TRIALS: u32 = 40;
+pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.03;
+/// Random trials per spawn tick; one valid candidate is reservoir-sampled (coverage + variety).
+const CHAOS_SPAWN_TRIALS: u32 = 72;
+
+/// Half-extent for sampling creep spawn XZ (aligned with `resolve_world_bounds` plus mob radius).
+#[inline]
+fn creep_spawn_half_extent() -> f64 {
+    TERRAIN_HALF_SIZE - 1.0 - MOB_RADIUS
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MobKind {
@@ -307,8 +312,9 @@ fn spawn_position_valid(x: f64, z: f64) -> bool {
 }
 
 fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option<Mob> {
-    let mut best: Option<Mob> = None;
-    let mut best_clear = -1.0_f64;
+    let half = creep_spawn_half_extent();
+    let mut chosen: Option<Mob> = None;
+    let mut valid_count = 0u32;
     for k in 0..CHAOS_SPAWN_TRIALS {
         let s = world_tick
             .wrapping_mul(1_103_515_245)
@@ -316,8 +322,8 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
             .wrapping_add(u64::from(id).wrapping_mul(97));
         let xf = s as f64 * 0.25;
         let zf = (s >> 17) as f64 * 0.31;
-        let x = (hash2(xf, 2.0) - 0.5) * 2.0 * (TERRAIN_HALF_SIZE - 28.0);
-        let z = (hash2(zf, 5.0) - 0.5) * 2.0 * (TERRAIN_HALF_SIZE - 28.0);
+        let x = (hash2(xf, 2.0) - 0.5) * 2.0 * half;
+        let z = (hash2(zf, 5.0) - 0.5) * 2.0 * half;
         if !spawn_position_valid(x, z) {
             continue;
         }
@@ -352,15 +358,44 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
         snap_to_ground_with_eye(&mut m.y, m.x, m.z, MOB_EYE_HEIGHT);
         extrude_mob_from_spawn_safe_zone(&mut m.x, &mut m.z);
         m.sync_y_from_terrain();
-        if spawn_position_valid(m.x, m.z) {
-            let c = min_distance_to_any_spawn_safe_aabb(m.x, m.z);
-            if c > best_clear {
-                best_clear = c;
-                best = Some(m);
+        if !spawn_position_valid(m.x, m.z) {
+            continue;
+        }
+        valid_count += 1;
+        let take = valid_count == 1
+            || hash2(
+                world_tick as f64 + f64::from(valid_count).mul_add(0.41, f64::from(k)),
+                id as f64 + f64::from(valid_count) * 0.017,
+            ) < 1.0 / f64::from(valid_count);
+        if take {
+            chosen = Some(m);
+        }
+    }
+    chosen
+}
+
+/// Pre-populates passive creeps at world boot using the same placement rules as tick spawning.
+/// Advances `tick_salt` when a batch of trials fails so the next attempt searches different RNG strata.
+/// Limits: stops after `64_000` failed batches to avoid a pathological infinite loop if the world rejected every sample.
+pub fn seed_passive_creeps(
+    mobs: &mut Vec<Mob>,
+    next_id: &mut u32,
+    colliders: &[AabbCollider],
+    target: usize,
+) {
+    let cap = target.min(MAX_MOBS);
+    let mut tick_salt: u64 = 0;
+    while creep_count(mobs) < cap {
+        if let Some(m) = try_spawn_mob(*next_id, tick_salt, colliders) {
+            mobs.push(m);
+            *next_id = next_id.wrapping_add(1);
+        } else {
+            tick_salt = tick_salt.wrapping_add(1);
+            if tick_salt > 64_000 {
+                break;
             }
         }
     }
-    best
 }
 
 fn dist2_xz(ax: f64, az: f64, bx: f64, bz: f64) -> f64 {
@@ -959,8 +994,10 @@ mod tests {
     #[test]
     fn aggro_extended_requires_chain() {
         let pid = Uuid::new_v4();
-        // Creep at origin; player 15 m away: outside 10 m base, inside 18 m extended.
-        let players = vec![(pid, 15.0, 2.0, 0.0)];
+        // Creep at origin; player in extended-only ring (outside base aggro, inside extended).
+        let ext = CREEP_AGGRO_BASE * AGGRO_EXTENDED_MULT;
+        let px = CREEP_AGGRO_BASE + (ext - CREEP_AGGRO_BASE) * 0.5;
+        let players = vec![(pid, px, 2.0, 0.0)];
         assert!(pick_aggro_target(0.0, 0.0, MobKind::Creep, &players, &[]).is_none());
         let eng = vec![MobEngagement {
             player: pid,

@@ -21,9 +21,9 @@ use crate::items::{
     MainHandKind, OffHandKind, PickupKind,
 };
 use crate::mobs::{
-    loot_for_death, mob_arrow_hit, mob_max_hp, push_engagement, spawn_boss_summoner,
-    spawn_boss_tank, spawn_training_dummy, tick_mobs, BossArrowPlan, Mob, MobEngagement, MobKind,
-    MobPlayerHit, TRAINING_DUMMY_HP,
+    loot_for_death, mob_arrow_hit, mob_max_hp, push_engagement, seed_passive_creeps,
+    spawn_boss_summoner, spawn_boss_tank, spawn_training_dummy, tick_mobs, BossArrowPlan, Mob,
+    MobEngagement, MobKind, MobPlayerHit, TRAINING_DUMMY_HP,
 };
 use crate::team::Team;
 use crate::validate::clamp_claimed_position;
@@ -33,7 +33,11 @@ use crate::world::{
     SPAWN_SAFE_ZONES,
 };
 
-const PLAYER_VISIBILITY_RADIUS: f64 = 65.0;
+/// How far other players are included in each viewer's snapshot (XZ meters).
+/// Must stay below typical fog/render distance so avatars match what you can see.
+/// The money leaderboard is global, so this should be large enough that "on the list"
+/// does not imply "in another bubble" during normal play.
+const PLAYER_VISIBILITY_RADIUS: f64 = 220.0;
 const MOB_VISIBILITY_RADIUS: f64 = 70.0;
 const ARROW_VISIBILITY_RADIUS: f64 = 75.0;
 const DAMAGE_EVENT_VISIBILITY_RADIUS: f64 = 80.0;
@@ -861,6 +865,21 @@ impl Simulation {
         };
         sim.refill_pickups();
         sim
+    }
+
+    /// Fills the desert with passive creeps immediately when [`SimConfig::auto_spawn_creeps`] is enabled.
+    /// Limits: requires the same static colliders passed to [`Simulation::tick`]; safe to skip if colliders are unavailable (tests that never call this still spawn over time).
+    pub fn seed_passive_creeps_at_boot(&mut self, colliders: &[AabbCollider]) {
+        if !self.config.auto_spawn_creeps {
+            return;
+        }
+        const TARGET_BOOT_CREEPS: usize = 24;
+        seed_passive_creeps(
+            &mut self.mobs,
+            &mut self.next_mob_id,
+            colliders,
+            TARGET_BOOT_CREEPS,
+        );
     }
 
     /// Returns a new player id and session token for a successful join.
@@ -2026,13 +2045,13 @@ mod tests {
         }
         {
             let far = sim.players.get_mut(&far_id).expect("far player exists");
-            far.x = 140.0;
+            far.x = 300.0;
             far.z = 0.0;
             far.y = sample_terrain_height(far.x, far.z) + EYE_HEIGHT;
         }
 
         sim.mobs.push(create_creep(11, 8.0, 0.0));
-        sim.mobs.push(create_creep(12, 140.0, 0.0));
+        sim.mobs.push(create_creep(12, 300.0, 0.0));
         sim.arrows.push(Arrow {
             id: 21,
             owner: viewer_id,
@@ -2047,8 +2066,8 @@ mod tests {
         sim.arrows.push(Arrow {
             id: 22,
             owner: far_id,
-            x: 140.0,
-            y: sample_terrain_height(140.0, 0.0) + 1.0,
+            x: 300.0,
+            y: sample_terrain_height(300.0, 0.0) + 1.0,
             z: 0.0,
             vx: 0.0,
             vy: 0.0,
@@ -2064,7 +2083,7 @@ mod tests {
         });
         sim.damage_floats.push(DamageFloatSnapshot {
             source_id: far_id.to_string(),
-            x: 140.0,
+            x: 300.0,
             y: 1.0,
             z: 0.0,
             amount: 7.0,
@@ -2188,6 +2207,34 @@ mod tests {
                 .count(),
             5
         );
+    }
+
+    #[test]
+    fn boot_seed_adds_passive_creeps_before_first_tick() {
+        let colliders = build_colliders();
+        let mut sim = Simulation::new(SimConfig::default());
+        assert_eq!(
+            sim.mobs.iter().filter(|m| m.kind == MobKind::Creep).count(),
+            0
+        );
+        sim.seed_passive_creeps_at_boot(&colliders);
+        let creeps = sim.mobs.iter().filter(|m| m.kind == MobKind::Creep).count();
+        assert!(
+            creeps >= 20,
+            "expected boot seed to populate passive creeps immediately, got {creeps}"
+        );
+    }
+
+    #[test]
+    fn boot_seed_skips_when_auto_spawn_creeps_disabled() {
+        let colliders = build_colliders();
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        sim.seed_passive_creeps_at_boot(&colliders);
+        assert!(!sim.mobs.iter().any(|m| m.kind == MobKind::Creep));
     }
 
     #[test]
