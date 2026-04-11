@@ -14,6 +14,7 @@ import type {
   InventoryItemKind,
   MainHandKind,
   MobKind,
+  MobMoveState,
   OffHandKind,
   PickupKind,
   SnapshotPickup,
@@ -196,6 +197,22 @@ function mobKind(v: unknown): MobKind {
   return "creep";
 }
 
+function mobMoveState(v: unknown): MobMoveState {
+  switch (v) {
+    case "pursuing":
+    case "meleeWindup":
+    case "meleeRecover":
+    case "shootWindup":
+    case "volleyWindup":
+    case "stompWindup":
+    case "summonWindup":
+    case "boltWindup":
+      return v;
+    default:
+      return "idle";
+  }
+}
+
 function defaultMaxHpForMobKind(kind: MobKind): number {
   switch (kind) {
     case "trainingDummy":
@@ -225,6 +242,8 @@ export function normalizeSnapshotMob(raw: unknown): SnapshotMob {
     hp: num(o.hp, 0),
     maxHp: num(o.maxHp, defaultMax),
     kind,
+    yaw: num(o.yaw, 0),
+    moveState: mobMoveState(o.moveState),
   };
 }
 
@@ -349,6 +368,11 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
     ? deathsIn.map((id) => str(id, "")).filter((s) => s.length > 0)
     : undefined;
 
+  const announcementsIn = o.announcements;
+  const announcements: string[] | undefined = Array.isArray(announcementsIn)
+    ? announcementsIn.map((msg) => str(msg, "")).filter((s) => s.length > 0)
+    : undefined;
+
   const chatIn = o.chat;
   const chat: SnapshotChatMessage[] | undefined = Array.isArray(chatIn)
     ? chatIn.map(normalizeSnapshotChatMessage).filter((c) => c.id.length > 0)
@@ -370,6 +394,9 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
       ? { damageFloats }
       : {}),
     ...(deaths !== undefined && deaths.length > 0 ? { deaths } : {}),
+    ...(announcements !== undefined && announcements.length > 0
+      ? { announcements }
+      : {}),
     ...(chat !== undefined && chat.length > 0 ? { chat } : {}),
     ...(moneyLeaderboard.length > 0 ? { moneyLeaderboard } : {}),
   };

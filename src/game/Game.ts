@@ -71,10 +71,74 @@ export interface GameOptions {
   incomingFloatRoot?: HTMLElement;
   /** Top-down minimap canvas (`#hud-minimap`). */
   minimapCanvas?: HTMLCanvasElement;
+  /** Global server announcements (`#hud-announcements`). */
+  announcementRoot?: HTMLElement;
+  /** Pause/settings dialog root. */
+  pausePanel?: HTMLElement;
+  /** Full paged leaderboard overlay root. */
+  leaderboardPanel?: HTMLElement;
+  /** Return to main menu from in-game UI. */
+  onReturnToMenu?: () => void;
+}
+
+type HudVisibilitySettingKey =
+  | "minimap"
+  | "leaderboard"
+  | "compass"
+  | "coords"
+  | "combatHud"
+  | "announcements"
+  | "bottomHint";
+
+interface HudVisibilitySettings {
+  minimap: boolean;
+  leaderboard: boolean;
+  compass: boolean;
+  coords: boolean;
+  combatHud: boolean;
+  announcements: boolean;
+  bottomHint: boolean;
+}
+
+const HUD_SETTINGS_KEY = "vibeme2.hudSettings";
+const COMPACT_LEADERBOARD_ROWS = 10;
+const FULL_LEADERBOARD_PAGE_SIZE = 12;
+
+function defaultHudVisibilitySettings(): HudVisibilitySettings {
+  return {
+    minimap: true,
+    leaderboard: true,
+    compass: true,
+    coords: true,
+    combatHud: true,
+    announcements: true,
+    bottomHint: true,
+  };
+}
+
+function loadHudVisibilitySettings(): HudVisibilitySettings {
+  const fallback = defaultHudVisibilitySettings();
+  try {
+    const raw = window.localStorage.getItem(HUD_SETTINGS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<HudVisibilitySettings>;
+    return {
+      minimap: parsed.minimap ?? fallback.minimap,
+      leaderboard: parsed.leaderboard ?? fallback.leaderboard,
+      compass: parsed.compass ?? fallback.compass,
+      coords: parsed.coords ?? fallback.coords,
+      combatHud: parsed.combatHud ?? fallback.combatHud,
+      announcements: parsed.announcements ?? fallback.announcements,
+      bottomHint: parsed.bottomHint ?? fallback.bottomHint,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 export class Game {
   private readonly canvas: HTMLCanvasElement;
+  private readonly hudHint?: HTMLElement;
   private readonly renderer: WebGLRenderer;
   private readonly scene: Scene;
   private readonly camera: PerspectiveCamera;
@@ -91,6 +155,7 @@ export class Game {
   private readonly compassHud: CompassHud | null;
   private readonly localThirdPersonRig: Group | null;
   private readonly hudCombat?: HTMLElement;
+  private readonly moneyLeaderboardRoot?: HTMLElement;
   private readonly localPlayerId?: string;
   private lastMobs: readonly SnapshotMob[] = [];
   private localPlayerSnapshot: SnapshotPlayer | null = null;
@@ -103,7 +168,26 @@ export class Game {
   private readonly minimapHud: MinimapHud | null;
   private readonly screenJuice: ScreenJuice | null;
   private readonly hitParticles: HitChunkParticles | null;
+  private readonly announcementRoot?: HTMLElement;
+  private readonly pausePanel?: HTMLElement;
+  private readonly leaderboardPanel?: HTMLElement;
+  private readonly onReturnToMenu?: () => void;
+  private readonly announcementTimers: number[] = [];
+  private readonly pauseSettingInputs = new Map<
+    HudVisibilitySettingKey,
+    HTMLInputElement
+  >();
+  private readonly leaderboardListEl?: HTMLOListElement;
+  private readonly leaderboardPageEl?: HTMLElement;
+  private readonly leaderboardPrevBtn?: HTMLButtonElement;
+  private readonly leaderboardNextBtn?: HTMLButtonElement;
+  private hudVisibility = loadHudVisibilitySettings();
+  private moneyLeaderboardRows: readonly MoneyLeaderboardEntry[] = [];
   private deathUiActive = false;
+  private pauseOpen = false;
+  private chatComposeOpen = false;
+  private leaderboardHeldOpen = false;
+  private leaderboardPage = 0;
   private deathRigSnapshot: SnapshotPlayer | null = null;
   private weaponFlashUntil = 0;
   private lastWeaponMain: MainHandKind | undefined;
@@ -111,16 +195,76 @@ export class Game {
   private shopOpen = false;
   private shopAtIndex: number | null = null;
   private readonly onDocKeydown = (e: KeyboardEvent): void => {
+    if (e.code === "Tab") {
+      if (
+        !e.repeat &&
+        !this.deathUiActive &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        e.preventDefault();
+        this.leaderboardHeldOpen = true;
+        this.updateLeaderboardPanelVisibility();
+      }
+      return;
+    }
+    if (e.code === "Escape") {
+      if (this.shopOpen) {
+        e.preventDefault();
+        this.closeShopPanel();
+        return;
+      }
+      if (this.pauseOpen) {
+        e.preventDefault();
+        this.resumeFromPause();
+      }
+      return;
+    }
+    if (
+      this.isLeaderboardOverlayVisible() &&
+      (e.code === "ArrowRight" ||
+        e.code === "PageDown" ||
+        e.code === "ArrowLeft" ||
+        e.code === "PageUp")
+    ) {
+      e.preventDefault();
+      this.changeLeaderboardPage(
+        e.code === "ArrowRight" || e.code === "PageDown" ? 1 : -1,
+      );
+      return;
+    }
     if (e.code !== "KeyE") return;
     if (document.pointerLockElement !== this.canvas) return;
+    if (this.pauseOpen || this.chatComposeOpen || this.deathUiActive) return;
     e.preventDefault();
     this.toggleShopPanel();
+  };
+  private readonly onDocKeyup = (e: KeyboardEvent): void => {
+    if (e.code !== "Tab") return;
+    this.leaderboardHeldOpen = false;
+    this.updateLeaderboardPanelVisibility();
+  };
+  private readonly onPointerLockChange = (): void => {
+    if (document.pointerLockElement === this.canvas) {
+      return;
+    }
+    if (
+      this.disposed ||
+      this.pauseOpen ||
+      this.shopOpen ||
+      this.chatComposeOpen ||
+      this.deathUiActive
+    ) {
+      return;
+    }
+    this.openPauseMenu();
   };
   private animationId: number | null = null;
   private disposed = false;
 
   constructor(options: GameOptions) {
     this.canvas = options.canvas;
+    this.hudHint = options.hudHint;
 
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
@@ -159,6 +303,7 @@ export class Game {
 
     this.localPlayerId = options.localPlayerId;
     this.hudCombat = options.hudCombat;
+    this.moneyLeaderboardRoot = options.moneyLeaderboardEl;
     this.remotePlayers =
       options.localPlayerId !== undefined
         ? new RemotePlayers(this.scene, options.localPlayerId)
@@ -222,13 +367,13 @@ export class Game {
         root: options.chatHud,
         isBlocked: options.isChatBlocked,
         onComposeOpen: () => {
-          this.controls.setInputSuppressed(true);
-          this.combatInput?.setChatSuppressed(true);
+          this.chatComposeOpen = true;
+          this.applyInputSuppression();
           void document.exitPointerLock();
         },
         onComposeClose: () => {
-          this.controls.setInputSuppressed(false);
-          this.combatInput?.setChatSuppressed(false);
+          this.chatComposeOpen = false;
+          this.applyInputSuppression();
         },
         onSend: (text: string) => {
           this.multiplayer?.sendChat(text);
@@ -261,6 +406,64 @@ export class Game {
             floatRoot: options.incomingFloatRoot,
           })
         : null;
+    this.announcementRoot = options.announcementRoot;
+    this.pausePanel = options.pausePanel;
+    this.leaderboardPanel = options.leaderboardPanel;
+    this.onReturnToMenu = options.onReturnToMenu;
+    const leaderboardList = options.leaderboardPanel?.querySelector(
+      "[data-leaderboard-list]",
+    );
+    this.leaderboardListEl =
+      leaderboardList instanceof HTMLOListElement ? leaderboardList : undefined;
+    const leaderboardPage = options.leaderboardPanel?.querySelector(
+      "[data-leaderboard-page]",
+    );
+    this.leaderboardPageEl =
+      leaderboardPage instanceof HTMLElement ? leaderboardPage : undefined;
+    const leaderboardPrev = options.leaderboardPanel?.querySelector(
+      "[data-leaderboard-prev]",
+    );
+    this.leaderboardPrevBtn =
+      leaderboardPrev instanceof HTMLButtonElement
+        ? leaderboardPrev
+        : undefined;
+    const leaderboardNext = options.leaderboardPanel?.querySelector(
+      "[data-leaderboard-next]",
+    );
+    this.leaderboardNextBtn =
+      leaderboardNext instanceof HTMLButtonElement
+        ? leaderboardNext
+        : undefined;
+
+    if (this.pausePanel) {
+      for (const input of this.pausePanel.querySelectorAll<HTMLInputElement>(
+        "input[data-setting]",
+      )) {
+        const key = input.dataset.setting as HudVisibilitySettingKey | undefined;
+        if (!key) continue;
+        this.pauseSettingInputs.set(key, input);
+        input.addEventListener("change", () => {
+          this.setHudVisibility(key, input.checked);
+        });
+      }
+      const resumeBtn = this.pausePanel.querySelector("#pause-resume");
+      if (resumeBtn instanceof HTMLButtonElement) {
+        resumeBtn.addEventListener("click", () => this.resumeFromPause());
+      }
+      const menuBtn = this.pausePanel.querySelector("#pause-menu");
+      if (menuBtn instanceof HTMLButtonElement) {
+        menuBtn.addEventListener("click", () => this.returnToMenu());
+      }
+    }
+    this.leaderboardPrevBtn?.addEventListener("click", () => {
+      this.changeLeaderboardPage(-1);
+    });
+    this.leaderboardNextBtn?.addEventListener("click", () => {
+      this.changeLeaderboardPage(1);
+    });
+    this.syncPauseMenuControls();
+    this.applyHudVisibilitySettings();
+    this.renderLeaderboardPanel();
 
     if (this.shopPanel) {
       const closeBtn = this.shopPanel.querySelector("[data-shop-close]");
@@ -272,6 +475,8 @@ export class Game {
     this.resizeHandler = (): void => this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
     document.addEventListener("keydown", this.onDocKeydown);
+    document.addEventListener("keyup", this.onDocKeyup);
+    document.addEventListener("pointerlockchange", this.onPointerLockChange);
     // Trigger once so we match whatever the initial canvas size is.
     this.handleResize();
   }
@@ -351,9 +556,14 @@ export class Game {
     }
 
     if (dyingNow && prevSnap !== null) {
+      if (this.shopOpen) this.closeShopPanel();
+      this.pauseOpen = false;
+      this.pausePanel?.classList.add("hidden");
+      this.leaderboardHeldOpen = false;
       this.deathUiActive = true;
       this.deathRigSnapshot = prevSnap;
-      this.controls.setInputSuppressed(true);
+      this.applyInputSuppression();
+      this.updateLeaderboardPanelVisibility();
       this.controls.beginDeathCamera();
       this.combatInput?.setDeathLocked(true);
     }
@@ -375,6 +585,9 @@ export class Game {
     this.worldMobs?.sync(mobs, msg.damageFloats);
     this.lastMobs = mobs;
     this.chatHud?.mergeFromSnapshot(msg.chat);
+    for (const text of msg.announcements ?? []) {
+      this.pushAnnouncement(text);
+    }
     this.updateMoneyLeaderboard(msg.moneyLeaderboard ?? []);
     this.updateCombatHud(players);
 
@@ -398,14 +611,19 @@ export class Game {
     if (this.localPlayerSnapshot !== null) {
       this.controls.syncAuthoritativePose(this.localPlayerSnapshot);
     }
-    this.controls.setInputSuppressed(false);
     this.combatInput?.setDeathLocked(false);
+    this.applyInputSuppression();
     if (this.localPlayerSnapshot !== null) {
       this.combatInput?.syncFromSnapshot(this.localPlayerSnapshot);
     }
   }
 
   private updateMoneyLeaderboard(rows: readonly MoneyLeaderboardEntry[]): void {
+    this.moneyLeaderboardRows = rows;
+    if (this.leaderboardPage >= this.totalLeaderboardPages()) {
+      this.leaderboardPage = Math.max(0, this.totalLeaderboardPages() - 1);
+    }
+    this.renderLeaderboardPanel();
     const list = this.moneyLeaderboardList;
     if (!list) return;
     list.replaceChildren();
@@ -416,7 +634,7 @@ export class Game {
       list.appendChild(p);
       return;
     }
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = 0; i < Math.min(COMPACT_LEADERBOARD_ROWS, rows.length); i++) {
       const r = rows[i];
       const li = document.createElement("li");
       li.className = "hud-money-lb-row";
@@ -443,7 +661,7 @@ export class Game {
     if (!el || !id) return;
     const me = players.find((p) => p.id === id);
     if (!me) return;
-    el.classList.remove("hidden");
+    el.classList.toggle("hidden", !this.hudVisibility.combatHud);
     const hpEl = el.querySelector("[data-hp]");
     const stEl = el.querySelector("[data-stamina]");
     const gEl = el.querySelector("[data-gold]");
@@ -543,6 +761,7 @@ export class Game {
     this.shopAtIndex = near.index;
     this.shopOpen = true;
     this.shopPanel.classList.remove("hidden");
+    this.applyInputSuppression();
     void document.exitPointerLock();
     const me = this.localPlayerSnapshot;
     if (me) this.renderShopOffers(me, this.shopAtIndex);
@@ -552,6 +771,7 @@ export class Game {
     this.shopOpen = false;
     this.shopAtIndex = null;
     this.shopPanel?.classList.add("hidden");
+    this.applyInputSuppression();
   }
 
   private renderShopOffers(me: SnapshotPlayer, shopIndex: number): void {
@@ -752,6 +972,8 @@ export class Game {
     }
     window.removeEventListener("resize", this.resizeHandler);
     document.removeEventListener("keydown", this.onDocKeydown);
+    document.removeEventListener("keyup", this.onDocKeyup);
+    document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     this.multiplayer?.dispose();
     this.multiplayer = null;
     this.remotePlayers?.dispose();
@@ -763,6 +985,13 @@ export class Game {
     this.minimapHud?.dispose();
     this.screenJuice?.dispose();
     this.hitParticles?.dispose();
+    for (const timer of this.announcementTimers) {
+      window.clearTimeout(timer);
+    }
+    this.announcementTimers.length = 0;
+    this.announcementRoot?.replaceChildren();
+    this.pausePanel?.classList.add("hidden");
+    this.leaderboardPanel?.classList.add("hidden");
     this.coordsEl?.classList.add("hidden");
     if (this.localThirdPersonRig) {
       this.scene.remove(this.localThirdPersonRig);
@@ -781,6 +1010,170 @@ export class Game {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
+  }
+
+  isChatBlocked(): boolean {
+    return this.deathUiActive || this.pauseOpen || this.shopOpen;
+  }
+
+  private applyInputSuppression(): void {
+    const blocked =
+      this.deathUiActive || this.pauseOpen || this.shopOpen || this.chatComposeOpen;
+    this.controls.setInputSuppressed(blocked);
+    this.combatInput?.setChatSuppressed(blocked);
+  }
+
+  private openPauseMenu(): void {
+    if (this.pauseOpen || this.deathUiActive) return;
+    this.pauseOpen = true;
+    this.pausePanel?.classList.remove("hidden");
+    this.applyInputSuppression();
+    this.updateLeaderboardPanelVisibility();
+  }
+
+  private resumeFromPause(): void {
+    if (!this.pauseOpen) return;
+    this.pauseOpen = false;
+    this.pausePanel?.classList.add("hidden");
+    this.applyInputSuppression();
+    this.updateLeaderboardPanelVisibility();
+    void this.controls.controls.lock();
+  }
+
+  private returnToMenu(): void {
+    this.pauseOpen = false;
+    this.pausePanel?.classList.add("hidden");
+    this.onReturnToMenu?.();
+  }
+
+  private setHudVisibility(
+    key: HudVisibilitySettingKey,
+    visible: boolean,
+  ): void {
+    this.hudVisibility = { ...this.hudVisibility, [key]: visible };
+    this.syncPauseMenuControls();
+    this.applyHudVisibilitySettings();
+    try {
+      window.localStorage.setItem(
+        HUD_SETTINGS_KEY,
+        JSON.stringify(this.hudVisibility),
+      );
+    } catch {
+      /* ignore storage failures */
+    }
+  }
+
+  private syncPauseMenuControls(): void {
+    for (const [key, input] of this.pauseSettingInputs) {
+      input.checked = this.hudVisibility[key];
+    }
+  }
+
+  private applyHudVisibilitySettings(): void {
+    this.minimapHud?.setVisible(this.hudVisibility.minimap);
+    this.compassHud?.setVisible(this.hudVisibility.compass);
+    this.moneyLeaderboardRoot?.classList.toggle(
+      "hidden",
+      !this.hudVisibility.leaderboard,
+    );
+    this.coordsEl?.classList.toggle("hidden", !this.hudVisibility.coords);
+    this.hudCombat?.classList.toggle("hidden", !this.hudVisibility.combatHud);
+    this.announcementRoot?.classList.toggle(
+      "hidden",
+      !this.hudVisibility.announcements,
+    );
+    if (this.hudHint) {
+      this.hudHint.style.display = this.hudVisibility.bottomHint ? "" : "none";
+    }
+  }
+
+  private totalLeaderboardPages(): number {
+    return Math.max(
+      1,
+      Math.ceil(this.moneyLeaderboardRows.length / FULL_LEADERBOARD_PAGE_SIZE),
+    );
+  }
+
+  private changeLeaderboardPage(delta: number): void {
+    const pages = this.totalLeaderboardPages();
+    this.leaderboardPage = Math.max(
+      0,
+      Math.min(pages - 1, this.leaderboardPage + delta),
+    );
+    this.renderLeaderboardPanel();
+  }
+
+  private isLeaderboardOverlayVisible(): boolean {
+    return this.pauseOpen || this.leaderboardHeldOpen;
+  }
+
+  private updateLeaderboardPanelVisibility(): void {
+    this.leaderboardPanel?.classList.toggle(
+      "hidden",
+      !this.isLeaderboardOverlayVisible(),
+    );
+  }
+
+  private renderLeaderboardPanel(): void {
+    this.updateLeaderboardPanelVisibility();
+    const list = this.leaderboardListEl;
+    if (!list) return;
+    list.replaceChildren();
+    const pages = this.totalLeaderboardPages();
+    const start = this.leaderboardPage * FULL_LEADERBOARD_PAGE_SIZE;
+    const slice = this.moneyLeaderboardRows.slice(
+      start,
+      start + FULL_LEADERBOARD_PAGE_SIZE,
+    );
+    if (this.leaderboardPageEl) {
+      this.leaderboardPageEl.textContent = `Page ${this.leaderboardPage + 1} / ${pages}`;
+    }
+    this.leaderboardPrevBtn?.toggleAttribute("disabled", this.leaderboardPage <= 0);
+    this.leaderboardNextBtn?.toggleAttribute(
+      "disabled",
+      this.leaderboardPage >= pages - 1,
+    );
+    if (slice.length === 0) {
+      const li = document.createElement("li");
+      li.className = "leaderboard-panel__row";
+      li.textContent = "No rankings yet";
+      list.appendChild(li);
+      return;
+    }
+    for (let i = 0; i < slice.length; i += 1) {
+      const row = slice[i];
+      const li = document.createElement("li");
+      li.className = "leaderboard-panel__row";
+      const rank = document.createElement("span");
+      rank.className = "leaderboard-panel__rank";
+      rank.textContent = String(start + i + 1);
+      const dot = document.createElement("span");
+      dot.className = `hud-money-lb-dot hud-money-lb-dot--${row.team}`;
+      const name = document.createElement("span");
+      name.className = "leaderboard-panel__name";
+      name.textContent = row.nickname;
+      const gold = document.createElement("span");
+      gold.className = "leaderboard-panel__gold";
+      gold.textContent = `${row.gold}g`;
+      li.append(rank, dot, name, gold);
+      list.appendChild(li);
+    }
+  }
+
+  private pushAnnouncement(text: string): void {
+    if (!this.announcementRoot || text.trim().length === 0) return;
+    const row = document.createElement("div");
+    row.className = "hud-announcement";
+    row.textContent = text;
+    this.announcementRoot.appendChild(row);
+    const timer = window.setTimeout(() => {
+      row.classList.add("hud-announcement--hide");
+      const cleanup = window.setTimeout(() => {
+        row.remove();
+      }, 220);
+      this.announcementTimers.push(cleanup);
+    }, 4200);
+    this.announcementTimers.push(timer);
   }
 }
 

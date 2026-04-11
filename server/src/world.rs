@@ -163,6 +163,9 @@ pub const EYE_HEIGHT: f64 = 1.65;
 pub const PLAYER_RADIUS: f64 = 0.35;
 pub const MAX_STEP_UP: f64 = 0.6;
 pub const GROUND_EPSILON: f64 = 0.05;
+const COLLIDER_RESOLVE_ITERATIONS: usize = 6;
+const LARGE_MOUNTAIN_COLLIDER_SCALE: f64 = 0.75;
+const SMALL_MOUNTAIN_COLLIDER_SCALE: f64 = 0.7;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AabbCollider {
@@ -208,10 +211,10 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         let height = 18.0 + hash2(i_f, 41.0) * 26.0;
         let base_y = sample_terrain_height(x, z);
         colliders.push(AabbCollider {
-            min_x: x - radius * 0.65,
-            max_x: x + radius * 0.65,
-            min_z: z - radius * 0.65,
-            max_z: z + radius * 0.65,
+            min_x: x - radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+            max_x: x + radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+            min_z: z - radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+            max_z: z + radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
             top_y: base_y + height,
         });
     }
@@ -228,10 +231,10 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         let height = 5.0 + hash2(i_f, 113.0) * 8.0;
         let base_y = sample_terrain_height(x, z);
         colliders.push(AabbCollider {
-            min_x: x - radius * 0.6,
-            max_x: x + radius * 0.6,
-            min_z: z - radius * 0.6,
-            max_z: z + radius * 0.6,
+            min_x: x - radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+            max_x: x + radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+            min_z: z - radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+            max_z: z + radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
             top_y: base_y + height,
         });
     }
@@ -380,6 +383,31 @@ const CASTLE_WALL_THICKNESS: f64 = 0.6;
 const CASTLE_WALL_HEIGHT: f64 = 3.5;
 const CASTLE_GATE_HALF_WIDTH: f64 = 1.5;
 
+#[derive(Clone, Copy)]
+enum GateSide {
+    North,
+    South,
+    East,
+    West,
+}
+
+fn gate_side_for_castle(center_x: f64, center_z: f64) -> GateSide {
+    if center_x.abs() < 1e-9 && center_z.abs() < 1e-9 {
+        return GateSide::South;
+    }
+    if center_z.abs() >= center_x.abs() {
+        if center_z >= 0.0 {
+            GateSide::South
+        } else {
+            GateSide::North
+        }
+    } else if center_x >= 0.0 {
+        GateSide::West
+    } else {
+        GateSide::East
+    }
+}
+
 fn add_spawn_castle(colliders: &mut Vec<AabbCollider>, center_x: f64, center_z: f64) {
     let half = SPAWN_COURTYARD_HALF;
     let t = CASTLE_WALL_THICKNESS;
@@ -398,25 +426,69 @@ fn add_spawn_castle(colliders: &mut Vec<AabbCollider>, center_x: f64, center_z: 
         });
     };
 
-    let east_x = center_x + half + t / 2.0;
-    add_segment(east_x, center_z, t, wall_z_span);
-
-    let west_x = center_x - half - t / 2.0;
-    add_segment(west_x, center_z, t, wall_z_span);
-
-    let north_z = center_z + half + t / 2.0;
-    add_segment(center_x, north_z, wall_x_span, t);
-
-    let south_z = center_z - half - t / 2.0;
-    let south_west_outer = center_x - half - t;
-    let south_east_outer = center_x + half + t;
+    let gate_side = gate_side_for_castle(center_x, center_z);
     let gate_half = CASTLE_GATE_HALF_WIDTH;
-    let south_left_w = (center_x - gate_half) - south_west_outer;
-    let south_right_w = south_east_outer - (center_x + gate_half);
-    let south_left_cx = (south_west_outer + (center_x - gate_half)) / 2.0;
-    let south_right_cx = ((center_x + gate_half) + south_east_outer) / 2.0;
-    add_segment(south_left_cx, south_z, south_left_w, t);
-    add_segment(south_right_cx, south_z, south_right_w, t);
+
+    let east_x = center_x + half + t / 2.0;
+    let west_x = center_x - half - t / 2.0;
+    let north_z = center_z + half + t / 2.0;
+    let south_z = center_z - half - t / 2.0;
+
+    match gate_side {
+        GateSide::East => {
+            let north_outer = center_z + half + t;
+            let south_outer = center_z - half - t;
+            let lower_h = (center_z - gate_half) - south_outer;
+            let upper_h = north_outer - (center_z + gate_half);
+            let lower_cz = (south_outer + (center_z - gate_half)) / 2.0;
+            let upper_cz = ((center_z + gate_half) + north_outer) / 2.0;
+            add_segment(east_x, lower_cz, t, lower_h);
+            add_segment(east_x, upper_cz, t, upper_h);
+        }
+        _ => add_segment(east_x, center_z, t, wall_z_span),
+    }
+
+    match gate_side {
+        GateSide::West => {
+            let north_outer = center_z + half + t;
+            let south_outer = center_z - half - t;
+            let lower_h = (center_z - gate_half) - south_outer;
+            let upper_h = north_outer - (center_z + gate_half);
+            let lower_cz = (south_outer + (center_z - gate_half)) / 2.0;
+            let upper_cz = ((center_z + gate_half) + north_outer) / 2.0;
+            add_segment(west_x, lower_cz, t, lower_h);
+            add_segment(west_x, upper_cz, t, upper_h);
+        }
+        _ => add_segment(west_x, center_z, t, wall_z_span),
+    }
+
+    match gate_side {
+        GateSide::North => {
+            let west_outer = center_x - half - t;
+            let east_outer = center_x + half + t;
+            let left_w = (center_x - gate_half) - west_outer;
+            let right_w = east_outer - (center_x + gate_half);
+            let left_cx = (west_outer + (center_x - gate_half)) / 2.0;
+            let right_cx = ((center_x + gate_half) + east_outer) / 2.0;
+            add_segment(left_cx, north_z, left_w, t);
+            add_segment(right_cx, north_z, right_w, t);
+        }
+        _ => add_segment(center_x, north_z, wall_x_span, t),
+    }
+
+    match gate_side {
+        GateSide::South => {
+            let west_outer = center_x - half - t;
+            let east_outer = center_x + half + t;
+            let left_w = (center_x - gate_half) - west_outer;
+            let right_w = east_outer - (center_x + gate_half);
+            let left_cx = (west_outer + (center_x - gate_half)) / 2.0;
+            let right_cx = ((center_x + gate_half) + east_outer) / 2.0;
+            add_segment(left_cx, south_z, left_w, t);
+            add_segment(right_cx, south_z, right_w, t);
+        }
+        _ => add_segment(center_x, south_z, wall_x_span, t),
+    }
 }
 
 #[inline]
@@ -439,7 +511,7 @@ pub fn resolve_colliders_entity(
     radius: f64,
 ) {
     let feet_y = *py - eye_height;
-    for _ in 0..4 {
+    for _ in 0..COLLIDER_RESOLVE_ITERATIONS {
         resolve_world_bounds(px, pz);
         for c in colliders {
             if feet_y > c.top_y - 0.05 {

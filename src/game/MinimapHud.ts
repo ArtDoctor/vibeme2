@@ -86,13 +86,13 @@ export class MinimapHud {
     const pv = mapToV(playerZ);
     ctx.save();
     ctx.translate(pu, pv);
-    ctx.rotate(-yaw);
+    ctx.rotate(yaw);
     ctx.fillStyle = "rgba(255,244,210,0.95)";
     ctx.beginPath();
-    ctx.moveTo(7, 0);
-    ctx.lineTo(-5, 4);
-    ctx.lineTo(-4, 0);
-    ctx.lineTo(-5, -4);
+    ctx.moveTo(0, -7);
+    ctx.lineTo(4, 5);
+    ctx.lineTo(0, 2);
+    ctx.lineTo(-4, 5);
     ctx.closePath();
     ctx.fill();
     ctx.restore();

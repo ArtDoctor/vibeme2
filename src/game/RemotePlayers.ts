@@ -12,7 +12,10 @@ import {
   type Camera,
   Vector3,
 } from "three";
-import { avatarRotationYFromCombatYaw } from "../combat/constants";
+import {
+  avatarRotationYFromCombatYaw,
+  horizontalYawFromCamera,
+} from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
 import type {
   ArmorPieceKind,
@@ -253,7 +256,7 @@ export function updatePlayerAvatarRig(
       const lenSq = viewFacingScratch.lengthSq();
       if (lenSq > 1e-10) {
         viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
-        yaw = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+        yaw = avatarRotationYFromCombatYaw(horizontalYawFromCamera(cam));
       }
     }
     g.rotation.y = yaw;
@@ -283,7 +286,7 @@ export function updatePlayerAvatarRig(
       const lenSq = viewFacingScratch.lengthSq();
       if (lenSq > 1e-10) {
         viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
-        g.rotation.y = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+        g.rotation.y = avatarRotationYFromCombatYaw(horizontalYawFromCamera(cam));
       } else {
         g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
       }

@@ -553,14 +553,14 @@ pub fn tick_mobs(
     if *spawn_timer >= 0.0 {
         *spawn_timer += dt;
     }
+    let mut spawn_salt = 0_u64;
     while *spawn_timer >= SPAWN_ATTEMPT_INTERVAL_S && creep_count(mobs) < MAX_MOBS {
         *spawn_timer -= SPAWN_ATTEMPT_INTERVAL_S;
-        if let Some(m) = try_spawn_mob(*next_id, world_tick, colliders) {
+        if let Some(m) = try_spawn_mob(*next_id, world_tick.wrapping_add(spawn_salt), colliders) {
             mobs.push(m);
             *next_id = next_id.wrapping_add(1);
-        } else {
-            break;
         }
+        spawn_salt = spawn_salt.wrapping_add(1);
     }
 
     let eligible: Vec<(Uuid, f64, f64, f64)> = players.to_vec();

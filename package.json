@@ -1,7 +1,7 @@
 {
   "name": "vibeme2",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/e2e-serve.mjs",

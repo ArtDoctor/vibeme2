@@ -184,6 +184,10 @@ runs; server is authoritative; client keeps only a session token in
       **death**: freeze pose, forced third-person, prone body on terrain, extra pull + FOV
       reveal (`FirstPersonControls`, `Game`, `ScreenJuice`, `RemotePlayers`).
 - [x] Minimap: world + biome bands, safe zones, player heading, mob dots (`MinimapHud.ts`).
+- [x] **Pause/settings overlay + full leaderboard pages**: `Esc` opens an in-game
+      pause menu with HUD visibility toggles (minimap, compact leaderboard, compass,
+      coords, combat HUD, announcements, controls hint); holding `Tab` shows the
+      full money leaderboard with paging while the top-right HUD stays compact.
 
 ---
 

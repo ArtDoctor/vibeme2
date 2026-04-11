@@ -23,7 +23,10 @@ const hudCoords = document.getElementById("hud-coords") ?? undefined;
 const hudMoneyLb = document.getElementById("hud-money-lb") ?? undefined;
 const hudHurt = document.getElementById("hud-hurt") ?? undefined;
 const hudFloatIncoming = document.getElementById("hud-float-incoming") ?? undefined;
+const hudAnnouncements = document.getElementById("hud-announcements") ?? undefined;
 const hudMinimap = document.getElementById("hud-minimap");
+const pausePanel = document.getElementById("pause-panel") ?? undefined;
+const leaderboardPanel = document.getElementById("leaderboard-panel") ?? undefined;
 const shopPanel = document.getElementById("shop-panel") ?? undefined;
 const hudChat = document.getElementById("hud-chat") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
@@ -169,9 +172,18 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       moneyLeaderboardEl: hudMoneyLb,
       hurtOverlay: hudHurt,
       incomingFloatRoot: hudFloatIncoming,
+      announcementRoot: hudAnnouncements,
+      pausePanel,
+      leaderboardPanel,
       minimapCanvas: hudMinimap instanceof HTMLCanvasElement ? hudMinimap : undefined,
       isChatBlocked: () =>
-        deathPanel !== null && !deathPanel.classList.contains("hidden"),
+        (deathPanel !== null && !deathPanel.classList.contains("hidden")) ||
+        (game?.isChatBlocked() ?? false),
+      onReturnToMenu: () => {
+        clearStoredSession();
+        disposeGame();
+        showJoinPanel();
+      },
     });
     for (const snap of pendingSnapshots) {
       applySnapshotFromNet(snap, mp.id);

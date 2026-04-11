@@ -81,6 +81,7 @@
 
       <div id="hud-hurt" class="hud-hurt" aria-hidden="true"></div>
       <div id="hud-float-incoming" class="hud-float-incoming" aria-hidden="true"></div>
+      <div id="hud-announcements" class="hud-announcements" aria-live="polite"></div>
       <div id="hud-minimap-wrap" class="hud-minimap-wrap">
         <canvas id="hud-minimap" class="hud-minimap" width="168" height="168" aria-label="Minimap"></canvas>
       </div>
@@ -185,6 +186,41 @@
         <button type="button" class="shop-close" data-shop-close>Close</button>
       </div>
 
+      <!-- ── PAUSE PANEL ── -->
+      <div id="pause-panel" class="pause-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+        <h2 id="pause-title" class="pause-title">Paused</h2>
+        <p class="pause-sub">Adjust the HUD and resume when ready.</p>
+        <div class="pause-settings">
+          <label class="pause-toggle"><input type="checkbox" data-setting="minimap" checked /> Show minimap</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="leaderboard" checked /> Show leaderboard</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="compass" checked /> Show compass</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="coords" checked /> Show coordinates</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="combatHud" checked /> Show combat HUD</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="announcements" checked /> Show announcements</label>
+          <label class="pause-toggle"><input type="checkbox" data-setting="bottomHint" checked /> Show controls hint</label>
+        </div>
+        <div class="pause-actions">
+          <button id="pause-resume" type="button" class="pause-btn pause-btn--primary">Resume</button>
+          <button id="pause-menu" type="button" class="pause-btn pause-btn--secondary">Return to Menu</button>
+        </div>
+      </div>
+
+      <!-- ── FULL LEADERBOARD ── -->
+      <div id="leaderboard-panel" class="leaderboard-panel hidden" aria-live="polite">
+        <div class="leaderboard-panel__card">
+          <div class="leaderboard-panel__head">
+            <h2 class="leaderboard-panel__title">Full Leaderboard</h2>
+            <div class="leaderboard-panel__page" data-leaderboard-page>Page 1 / 1</div>
+          </div>
+          <ol class="leaderboard-panel__list" data-leaderboard-list></ol>
+          <div class="leaderboard-panel__controls">
+            <button type="button" class="leaderboard-panel__btn" data-leaderboard-prev>Prev</button>
+            <span class="leaderboard-panel__hint">Hold <kbd>Tab</kbd> · <kbd>←</kbd>/<kbd>→</kbd> change page</span>
+            <button type="button" class="leaderboard-panel__btn" data-leaderboard-next>Next</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ── PROXIMITY CHAT ── -->
       <div id="hud-chat" class="hud-chat" aria-live="polite">
         <div class="hud-chat-log" data-chat-log></div>
@@ -209,11 +245,12 @@
           <kbd>Shift</kbd> sprint &nbsp;·&nbsp;
           <kbd>Space</kbd> jump &nbsp;·&nbsp;
           <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> loadout &nbsp;·&nbsp;
+          <kbd>Tab</kbd> leaderboard &nbsp;·&nbsp;
           <kbd>T</kbd> chat &nbsp;·&nbsp;
           <kbd>E</kbd> shop &nbsp;·&nbsp;
           <kbd>LMB</kbd> attack &nbsp;·&nbsp;
           <kbd>RMB</kbd> block &nbsp;·&nbsp;
-          <kbd>Esc</kbd> free mouse
+          <kbd>Esc</kbd> pause
         </p>
         <p class="hud-version" id="hud-version" aria-label="Build version"></p>
       </div>

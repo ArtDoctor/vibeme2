@@ -13,7 +13,13 @@ import {
   MOB_HP,
   TRAINING_DUMMY_HP,
 } from "../combat/constants";
-import type { DamageFloatEvent, MobKind, SnapshotMob } from "../net/types";
+import { avatarRotationYFromCombatYaw } from "../combat/constants";
+import type {
+  DamageFloatEvent,
+  MobKind,
+  MobMoveState,
+  SnapshotMob,
+} from "../net/types";
 import type { HitChunkParticles } from "./HitChunkParticles";
 
 const CREEP_MAT = new MeshLambertMaterial({ color: 0x8b4513 });
@@ -51,6 +57,10 @@ function defaultMaxHp(kind: MobKind): number {
     default:
       return MOB_HP;
   }
+}
+
+function isWindupState(state: MobMoveState): boolean {
+  return state !== "idle" && state !== "pursuing" && state !== "meleeRecover";
 }
 
 function buildMobRig(kind: MobKind): Group {
@@ -163,8 +173,10 @@ export class WorldMobs {
       }
       view.hp = m.hp;
       view.maxHp = m.maxHp > 0 ? m.maxHp : defaultMaxHp(m.kind);
-      view.root.position.set(m.x, m.y - 0.2, m.z);
-      view.root.rotation.y = 0;
+      const windup = isWindupState(m.moveState);
+      view.root.position.set(m.x, m.y - 0.2 + (windup ? 0.08 : 0), m.z);
+      view.root.rotation.y = avatarRotationYFromCombatYaw(m.yaw);
+      view.root.scale.set(1, windup ? 1.14 : 1, windup ? 0.9 : 1);
     }
     for (const [id, view] of this.byId) {
       if (!seen.has(id)) {

@@ -115,6 +115,17 @@ export type MobKind =
   | "bossTank"
   | "bossSummoner";
 
+export type MobMoveState =
+  | "idle"
+  | "pursuing"
+  | "meleeWindup"
+  | "meleeRecover"
+  | "shootWindup"
+  | "volleyWindup"
+  | "stompWindup"
+  | "summonWindup"
+  | "boltWindup";
+
 export interface SnapshotMob {
   id: number;
   x: number;
@@ -123,6 +134,8 @@ export interface SnapshotMob {
   hp: number;
   maxHp: number;
   kind: MobKind;
+  yaw: number;
+  moveState: MobMoveState;
 }
 
 export interface DamageFloatEvent {
@@ -165,6 +178,8 @@ export interface SnapshotMsg {
   damageFloats?: DamageFloatEvent[];
   /** Player ids who died this tick (server respawns immediately; used for UI). */
   deaths?: readonly string[];
+  /** Global server text announcements (e.g. player deaths). */
+  announcements?: readonly string[];
   /** Omitted when no chat lines in range this tick. */
   chat?: readonly SnapshotChatMessage[];
   /** Omitted by older servers; default to empty. */

@@ -121,6 +121,8 @@ const MOUNTAIN_COUNT = 36;
 const SMALL_MOUNTAIN_COUNT = 72;
 const ROCK_COUNT = 140;
 const FOREST_TREE_COUNT = 96;
+const LARGE_MOUNTAIN_COLLIDER_SCALE = 0.75;
+const SMALL_MOUNTAIN_COLLIDER_SCALE = 0.7;
 
 /**
  * Builds the desert: terrain mesh, sky/fog, lighting, scattered mountains/rocks.
@@ -201,10 +203,10 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     scene.add(cone);
 
     colliders.push({
-      minX: x - radius * 0.65,
-      maxX: x + radius * 0.65,
-      minZ: z - radius * 0.65,
-      maxZ: z + radius * 0.65,
+      minX: x - radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+      maxX: x + radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+      minZ: z - radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
+      maxZ: z + radius * LARGE_MOUNTAIN_COLLIDER_SCALE,
       topY: baseY + height,
     });
   }
@@ -228,10 +230,10 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     scene.add(cone);
 
     colliders.push({
-      minX: x - radius * 0.6,
-      maxX: x + radius * 0.6,
-      minZ: z - radius * 0.6,
-      maxZ: z + radius * 0.6,
+      minX: x - radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+      maxX: x + radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+      minZ: z - radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
+      maxZ: z + radius * SMALL_MOUNTAIN_COLLIDER_SCALE,
       topY: baseY + height,
     });
   }
@@ -409,6 +411,8 @@ function addSpawnCastle(
   const h = CASTLE_WALL_HEIGHT;
   const wallZSpan = 2 * half + 2 * t;
   const wallXSpan = wallZSpan;
+  const gateSide = gateSideForCastle(centerX, centerZ);
+  const gateHalf = CASTLE_GATE_HALF_WIDTH;
 
   const stoneMat = new MeshLambertMaterial({ color: CASTLE_STONE_COLOR });
 
@@ -431,24 +435,74 @@ function addSpawnCastle(
   };
 
   const eastX = centerX + half + t / 2;
-  addSegment(eastX, centerZ, t, wallZSpan);
-
   const westX = centerX - half - t / 2;
-  addSegment(westX, centerZ, t, wallZSpan);
-
   const northZ = centerZ + half + t / 2;
-  addSegment(centerX, northZ, wallXSpan, t);
-
   const southZ = centerZ - half - t / 2;
-  const southWestOuter = centerX - half - t;
-  const southEastOuter = centerX + half + t;
-  const gateHalf = CASTLE_GATE_HALF_WIDTH;
-  const southLeftW = centerX + -gateHalf - southWestOuter;
-  const southRightW = southEastOuter - (centerX + gateHalf);
-  const southLeftCx = (southWestOuter + (centerX + -gateHalf)) / 2;
-  const southRightCx = (centerX + gateHalf + southEastOuter) / 2;
-  addSegment(southLeftCx, southZ, southLeftW, t);
-  addSegment(southRightCx, southZ, southRightW, t);
+
+  if (gateSide === "east") {
+    const northOuter = centerZ + half + t;
+    const southOuter = centerZ - half - t;
+    const lowerH = centerZ - gateHalf - southOuter;
+    const upperH = northOuter - (centerZ + gateHalf);
+    const lowerCz = (southOuter + (centerZ - gateHalf)) / 2;
+    const upperCz = (centerZ + gateHalf + northOuter) / 2;
+    addSegment(eastX, lowerCz, t, lowerH);
+    addSegment(eastX, upperCz, t, upperH);
+  } else {
+    addSegment(eastX, centerZ, t, wallZSpan);
+  }
+
+  if (gateSide === "west") {
+    const northOuter = centerZ + half + t;
+    const southOuter = centerZ - half - t;
+    const lowerH = centerZ - gateHalf - southOuter;
+    const upperH = northOuter - (centerZ + gateHalf);
+    const lowerCz = (southOuter + (centerZ - gateHalf)) / 2;
+    const upperCz = (centerZ + gateHalf + northOuter) / 2;
+    addSegment(westX, lowerCz, t, lowerH);
+    addSegment(westX, upperCz, t, upperH);
+  } else {
+    addSegment(westX, centerZ, t, wallZSpan);
+  }
+
+  if (gateSide === "north") {
+    const westOuter = centerX - half - t;
+    const eastOuter = centerX + half + t;
+    const leftW = centerX - gateHalf - westOuter;
+    const rightW = eastOuter - (centerX + gateHalf);
+    const leftCx = (westOuter + (centerX - gateHalf)) / 2;
+    const rightCx = (centerX + gateHalf + eastOuter) / 2;
+    addSegment(leftCx, northZ, leftW, t);
+    addSegment(rightCx, northZ, rightW, t);
+  } else {
+    addSegment(centerX, northZ, wallXSpan, t);
+  }
+
+  if (gateSide === "south") {
+    const westOuter = centerX - half - t;
+    const eastOuter = centerX + half + t;
+    const leftW = centerX - gateHalf - westOuter;
+    const rightW = eastOuter - (centerX + gateHalf);
+    const leftCx = (westOuter + (centerX - gateHalf)) / 2;
+    const rightCx = (centerX + gateHalf + eastOuter) / 2;
+    addSegment(leftCx, southZ, leftW, t);
+    addSegment(rightCx, southZ, rightW, t);
+  } else {
+    addSegment(centerX, southZ, wallXSpan, t);
+  }
+}
+
+function gateSideForCastle(
+  centerX: number,
+  centerZ: number,
+): "north" | "south" | "east" | "west" {
+  if (Math.abs(centerX) < 1e-9 && Math.abs(centerZ) < 1e-9) {
+    return "south";
+  }
+  if (Math.abs(centerZ) >= Math.abs(centerX)) {
+    return centerZ >= 0 ? "south" : "north";
+  }
+  return centerX >= 0 ? "west" : "east";
 }
 
 function stallOutwardDir(

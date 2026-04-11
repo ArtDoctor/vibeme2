@@ -49,8 +49,8 @@ const CHAT_PROXIMITY_RADIUS: f64 = 36.0;
 const CHAT_MAX_CHARS: usize = 160;
 const CHAT_TTL: Duration = Duration::from_secs(60);
 const CHAT_MIN_INTERVAL: Duration = Duration::from_millis(900);
-/// Global richest list (by gold); included in every snapshot, not proximity-filtered.
-const MONEY_LEADERBOARD_TOP: usize = 10;
+const STAMINA_SPRINT_PER_S: f64 = 26.0;
+const SAFE_ZONE_REGEN_HP_PER_S: f64 = 10.0;
 
 fn unix_ms_now() -> u64 {
     SystemTime::now()
@@ -254,6 +254,7 @@ struct Player {
     equipment: EquipmentState,
     blocking: bool,
     bow_charge: f64,
+    sprinting: bool,
     swing_cooldown_s: f64,
     /// Seconds remaining for remote swing animation.
     swing_visual_s: f64,
@@ -293,6 +294,8 @@ pub struct SnapshotOut {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     deaths: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    announcements: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     chat: Vec<ChatSnapshot>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     money_leaderboard: Vec<MoneyLeaderboardEntry>,
@@ -320,7 +323,6 @@ fn money_leaderboard_from_players(players: &[PlayerSnapshot]) -> Vec<MoneyLeader
             .cmp(&a.gold)
             .then_with(|| a.nickname.cmp(&b.nickname))
     });
-    rows.truncate(MONEY_LEADERBOARD_TOP);
     rows
 }
 
@@ -397,6 +399,8 @@ struct MobSnapshot {
     y: f64,
     z: f64,
     hp: f64,
+    yaw: f64,
+    move_state: &'static str,
 }
 
 #[derive(Clone, Serialize)]
@@ -420,6 +424,7 @@ pub struct SnapshotFrame {
     mobs: Vec<MobSnapshot>,
     damage_floats: Vec<DamageFloatSnapshot>,
     deaths: Vec<String>,
+    announcements: Vec<String>,
     player_lookup: HashMap<String, usize>,
     player_index: SpatialIndex,
     arrow_index: SpatialIndex,
@@ -459,6 +464,7 @@ pub struct Simulation {
     loot_salt: u64,
     damage_floats: Vec<DamageFloatSnapshot>,
     deaths_this_tick: Vec<Uuid>,
+    announcements_this_tick: Vec<String>,
     chat_log: Vec<StoredChatMessage>,
     next_chat_id: u64,
     last_chat_at: HashMap<Uuid, Instant>,
@@ -533,6 +539,20 @@ fn mob_kind_tag(mob: &Mob) -> &'static str {
     }
 }
 
+fn mob_move_state_tag(mob: &Mob) -> &'static str {
+    match mob.move_state {
+        crate::mobs::MobMoveState::Idle => "idle",
+        crate::mobs::MobMoveState::Pursuing => "pursuing",
+        crate::mobs::MobMoveState::MeleeWindup => "meleeWindup",
+        crate::mobs::MobMoveState::MeleeRecover => "meleeRecover",
+        crate::mobs::MobMoveState::ShootWindup => "shootWindup",
+        crate::mobs::MobMoveState::VolleyWindup => "volleyWindup",
+        crate::mobs::MobMoveState::StompWindup => "stompWindup",
+        crate::mobs::MobMoveState::SummonWindup => "summonWindup",
+        crate::mobs::MobMoveState::BoltWindup => "boltWindup",
+    }
+}
+
 fn pickup_target_count(kind: PickupKind) -> u32 {
     match kind {
         // Ring layout in `pickup_slot_position`: 10 / 10 / 5 slots on the first ring each.
@@ -578,6 +598,7 @@ impl Player {
             equipment: EquipmentState::default(),
             blocking: false,
             bow_charge: 0.0,
+            sprinting: false,
             swing_cooldown_s: 0.0,
             swing_visual_s: 0.0,
             boss_unlock: false,
@@ -592,6 +613,7 @@ impl Player {
         self.equipment = EquipmentState::default();
         self.blocking = false;
         self.bow_charge = 0.0;
+        self.sprinting = false;
         self.swing_cooldown_s = 0.0;
         self.swing_visual_s = 0.0;
         let (x, y, z) = spawn_pose_for_team(self.team);
@@ -726,6 +748,7 @@ impl SnapshotFrame {
                     mobs: Vec::new(),
                     damage_floats: self.damage_floats.clone(),
                     deaths: self.deaths.clone(),
+                    announcements: self.announcements.clone(),
                     chat: Vec::new(),
                     money_leaderboard,
                 };
@@ -820,6 +843,7 @@ impl SnapshotFrame {
             mobs,
             damage_floats,
             deaths: self.deaths.clone(),
+            announcements: self.announcements.clone(),
             chat,
             money_leaderboard,
         }
@@ -859,6 +883,7 @@ impl Simulation {
             loot_salt: 1,
             damage_floats: Vec::new(),
             deaths_this_tick: Vec::new(),
+            announcements_this_tick: Vec::new(),
             chat_log: Vec::new(),
             next_chat_id: 1,
             last_chat_at: HashMap::new(),
@@ -1032,6 +1057,27 @@ impl Simulation {
         }
         player.gold -= offer.price;
         player.inventory.add(offer.item, 1);
+        match offer.item {
+            InventoryItemKind::IronSword => player.equipment.main_hand = MainHandKind::IronSword,
+            InventoryItemKind::SteelSword => player.equipment.main_hand = MainHandKind::SteelSword,
+            InventoryItemKind::VanguardSword => {
+                player.equipment.main_hand = MainHandKind::VanguardSword
+            }
+            InventoryItemKind::ShortBow => player.equipment.main_hand = MainHandKind::ShortBow,
+            InventoryItemKind::BasicShield => {
+                player.equipment.off_hand = Some(OffHandKind::BasicShield);
+            }
+            InventoryItemKind::ScoutHelm => {
+                player.equipment.armor.head = Some(ArmorPieceKind::ScoutHelm);
+            }
+            InventoryItemKind::ScoutChest => {
+                player.equipment.armor.chest = Some(ArmorPieceKind::ScoutChest);
+            }
+            InventoryItemKind::ScoutLegs => {
+                player.equipment.armor.legs = Some(ArmorPieceKind::ScoutLegs);
+            }
+            InventoryItemKind::WoodenSword | InventoryItemKind::GearUpgradeToken => {}
+        }
         Ok(())
     }
 
@@ -1114,6 +1160,12 @@ impl Simulation {
             player.z = next_z;
             player.yaw = input.yaw;
             player.pitch = input.pitch;
+            let moved_dx = next_x - prev.0;
+            let moved_dz = next_z - prev.2;
+            player.sprinting = input.sprinting
+                && !flying
+                && !input.creative
+                && moved_dx * moved_dx + moved_dz * moved_dz > 1e-4;
             let desired_main_hand = input
                 .main_hand
                 .as_deref()
@@ -1149,12 +1201,18 @@ impl Simulation {
         self.prune_chat_messages();
         for player in self.players.values_mut() {
             player.stamina = (player.stamina + STAMINA_REGEN_PER_S * dt).min(MAX_STAMINA);
+            if player.sprinting {
+                player.stamina = (player.stamina - STAMINA_SPRINT_PER_S * dt).max(0.0);
+            }
             if player.can_block_with_shield() {
                 player.stamina = (player.stamina - STAMINA_BLOCK_PER_S * dt).max(0.0);
             }
             if player.can_fire_bow() && player.bow_charge > 0.05 {
                 player.stamina =
                     (player.stamina - STAMINA_BOW_CHARGE_PER_S * dt * player.bow_charge).max(0.0);
+            }
+            if point_in_spawn_safe_zone(player.x, player.z) && player.hp < MAX_HP {
+                player.hp = (player.hp + SAFE_ZONE_REGEN_HP_PER_S * dt).min(MAX_HP);
             }
             player.swing_cooldown_s = (player.swing_cooldown_s - dt).max(0.0);
             player.swing_visual_s = (player.swing_visual_s - dt).max(0.0);
@@ -1233,6 +1291,7 @@ impl Simulation {
             .map(|id| id.to_string())
             .collect::<Vec<_>>();
         deaths.sort_unstable();
+        let announcements = std::mem::take(&mut self.announcements_this_tick);
 
         let mut players = self
             .players
@@ -1309,6 +1368,8 @@ impl Simulation {
                 y: mob.y,
                 z: mob.z,
                 hp: mob.hp,
+                yaw: mob.facing_yaw,
+                move_state: mob_move_state_tag(mob),
             })
             .collect::<Vec<_>>();
         mobs.sort_unstable_by_key(|mob| mob.id);
@@ -1365,6 +1426,7 @@ impl Simulation {
             mobs,
             damage_floats,
             deaths,
+            announcements,
             player_lookup,
             player_index: SpatialIndex::from_positions(PLAYER_VISIBILITY_RADIUS, &player_positions),
             arrow_index: SpatialIndex::from_positions(ARROW_VISIBILITY_RADIUS, &arrow_positions),
@@ -1504,11 +1566,13 @@ impl Simulation {
         let snapshot = self
             .players
             .get(&victim_id)
-            .map(|p| (p.x, p.z, p.gold, p.inventory.clone()));
-        let Some((x, z, gold, inv)) = snapshot else {
+            .map(|p| (p.x, p.z, p.gold, p.inventory.clone(), p.nickname.clone()));
+        let Some((x, z, gold, inv, nickname)) = snapshot else {
             return;
         };
         self.deaths_this_tick.push(victim_id);
+        self.announcements_this_tick
+            .push(format!("{nickname} fell in battle."));
         {
             let player = self.players.get_mut(&victim_id).expect("player exists");
             respawn_player(player);
@@ -2416,5 +2480,109 @@ mod tests {
         let v_far = frame.for_viewer(far_id);
         assert!(!v_near.chat.is_empty());
         assert!(v_far.chat.is_empty());
+    }
+
+    #[test]
+    fn shop_buy_equips_purchased_gear() {
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (player_id, _, _) = sim.join_player("buyer".to_string(), Team::Red).expect("join");
+        {
+            let player = sim.players.get_mut(&player_id).expect("player exists");
+            player.gold = 120;
+        }
+
+        sim.shop_buy(player_id, crate::world::TEAM_RED_SAFE_ZONE_INDEX, "ironSword")
+            .expect("buy sword");
+        sim.shop_buy(player_id, crate::world::TEAM_RED_SAFE_ZONE_INDEX, "scoutChest")
+            .expect("buy armor");
+
+        let player = sim.players.get(&player_id).expect("player exists");
+        assert_eq!(player.equipment.main_hand, MainHandKind::IronSword);
+        assert_eq!(player.equipment.armor.chest, Some(ArmorPieceKind::ScoutChest));
+        assert!(player.inventory.has(InventoryItemKind::IronSword));
+        assert!(player.inventory.has(InventoryItemKind::ScoutChest));
+        assert_eq!(player.gold, 52);
+    }
+
+    #[test]
+    fn sprinting_drains_stamina_and_safe_zone_regens_hp() {
+        let colliders = build_colliders();
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (player_id, _, team) = sim.join_player("runner".to_string(), Team::Blue).expect("join");
+        let (x, y, z) = spawn_pose_for_team(team);
+        {
+            let player = sim.players.get_mut(&player_id).expect("player exists");
+            player.x = x;
+            player.y = y;
+            player.z = z;
+            player.hp = 55.0;
+            player.stamina = 70.0;
+        }
+        let input = InputCommand {
+            x,
+            y,
+            z: z + 2.2,
+            yaw: 0.0,
+            pitch: 0.0,
+            creative: false,
+            flying: false,
+            sprinting: true,
+            main_hand: None,
+            off_hand: None,
+            blocking: false,
+            bow_charge: 0.0,
+            swing: false,
+            fire_arrow: false,
+        };
+        assert!(sim.apply_input(player_id, &input, 0.1, &colliders));
+
+        sim.tick(0.1, 1, &colliders);
+
+        let player = sim.players.get(&player_id).expect("player exists");
+        assert!(player.stamina < 70.0, "expected sprinting to spend stamina");
+        assert!(player.hp > 55.0, "expected safe-zone regen to heal hp");
+    }
+
+    #[test]
+    fn snapshot_includes_mob_facing_and_state() {
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        sim.mobs.push(Mob {
+            id: 9,
+            kind: MobKind::Creep,
+            x: 4.0,
+            y: sample_terrain_height(4.0, 6.0) + crate::mobs::MOB_EYE_HEIGHT,
+            z: 6.0,
+            hp: crate::mobs::MOB_HP,
+            move_state: MobMoveState::MeleeWindup,
+            state_timer: 0.2,
+            aggro: None,
+            wander_yaw: 0.0,
+            wander_timer: 0.0,
+            boss_cd: 0.0,
+            boss_attack_idx: 0,
+            facing_yaw: 1.25,
+            melee_cd: 0.0,
+        });
+
+        let frame = sim.build_snapshot_frame(3);
+        let mob = frame
+            .mobs
+            .iter()
+            .find(|mob| mob.id == 9)
+            .expect("mob in snapshot");
+        assert!((mob.yaw - 1.25).abs() < 1e-9);
+        assert_eq!(mob.move_state, "meleeWindup");
     }
 }

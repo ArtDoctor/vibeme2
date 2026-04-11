@@ -91,7 +91,7 @@ export function iterativelyResolvePlayerXz(
   },
 ): { x: number; z: number } {
   const playerRadius = options.playerRadius ?? PLAYER_RADIUS;
-  const iterations = options.iterations ?? 4;
+  const iterations = options.iterations ?? 6;
   let x = px;
   let z = pz;
   for (let iter = 0; iter < iterations; iter += 1) {
