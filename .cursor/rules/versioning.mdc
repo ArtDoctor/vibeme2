@@ -1,0 +1,30 @@
+---
+description: When and how to bump app version (semver) for repo-root VERSION + package.json
+alwaysApply: true
+---
+
+# Version bumps (semver)
+
+Release id lives in repo-root **`VERSION`** and must stay in lockstep with **`package.json`** `"version"` (`npm run check:version` enforces this). When a task warrants a version change, update **both** to the same value in the same commit.
+
+Use [semantic versioning](https://semver.org/): **`MAJOR.MINOR.PATCH`** (e.g. `1.4.2`).
+
+## Which digit to bump
+
+| Change type | Bump | Reset | Examples |
+|-------------|------|-------|----------|
+| **Patch** | `x.y.(z+1)` | — | Bug fixes, regressions, small behavior corrections, safe refactors, copy/style tweaks, test-only changes that do not add user-facing capability. |
+| **Minor** | `x.(y+1).0` | PATCH → `0` | New features, new UI or gameplay capability, backwards-compatible protocol/schema additions, new optional settings. |
+| **Major** | `(x+1).0.0` | MINOR/PATCH → `0` | Breaking changes: removed or renamed client/server message fields, incompatible save/session format, intentional removal of behavior users relied on. |
+
+## Heuristics for this project
+
+- **Patch** if players/ops would describe it as “fix” or “adjust” and nothing new is advertised.
+- **Minor** if you would mention it in release notes as a **new** thing users can try.
+- **Major** if existing clients or sessions could **break** against the same server/build without coordinated upgrade.
+
+If the work is **docs-only**, **internal refactor with no release**, or the user said **not** to version: leave **`VERSION`** / **`package.json`** unchanged unless they explicitly asked for a bump.
+
+## After editing versions
+
+Run `npm run check:version` (or `npm run smoke:ci`) before finishing so CI will not fail on mismatch.

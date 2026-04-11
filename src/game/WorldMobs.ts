@@ -14,6 +14,7 @@ import {
   TRAINING_DUMMY_HP,
 } from "../combat/constants";
 import type { DamageFloatEvent, MobKind, SnapshotMob } from "../net/types";
+import type { HitChunkParticles } from "./HitChunkParticles";
 
 const CREEP_MAT = new MeshLambertMaterial({ color: 0x8b4513 });
 const DUMMY_MAT = new MeshLambertMaterial({ color: 0x8a8a78 });
@@ -109,11 +110,18 @@ export class WorldMobs {
   private readonly forward = new Vector3();
   private readonly floats: FloatingDamage[] = [];
   private readonly localPlayerId: string;
+  private readonly hitParticles: HitChunkParticles | null;
 
-  constructor(scene: Scene, camera: PerspectiveCamera, localPlayerId: string) {
+  constructor(
+    scene: Scene,
+    camera: PerspectiveCamera,
+    localPlayerId: string,
+    hitParticles?: HitChunkParticles | null,
+  ) {
     this.scene = scene;
     this.camera = camera;
     this.localPlayerId = localPlayerId;
+    this.hitParticles = hitParticles ?? null;
     this.overlay = document.createElement("div");
     this.overlay.className = "world-mob-overlay";
     const app = document.getElementById("app");
@@ -171,6 +179,7 @@ export class WorldMobs {
       for (const ev of damageFloats) {
         if (ev.sourceId === this.localPlayerId) {
           this.spawnDamageFloat(ev.amount, ev.x, ev.y, ev.z);
+          this.hitParticles?.burst(ev.x, ev.y, ev.z, "strike");
         }
       }
     }

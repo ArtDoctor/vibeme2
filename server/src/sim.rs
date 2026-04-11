@@ -45,6 +45,8 @@ const CHAT_PROXIMITY_RADIUS: f64 = 36.0;
 const CHAT_MAX_CHARS: usize = 160;
 const CHAT_TTL: Duration = Duration::from_secs(60);
 const CHAT_MIN_INTERVAL: Duration = Duration::from_millis(900);
+/// Global richest list (by gold); included in every snapshot, not proximity-filtered.
+const MONEY_LEADERBOARD_TOP: usize = 10;
 
 fn unix_ms_now() -> u64 {
     SystemTime::now()
@@ -288,6 +290,34 @@ pub struct SnapshotOut {
     deaths: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     chat: Vec<ChatSnapshot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    money_leaderboard: Vec<MoneyLeaderboardEntry>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MoneyLeaderboardEntry {
+    nickname: String,
+    team: Team,
+    gold: u32,
+}
+
+fn money_leaderboard_from_players(players: &[PlayerSnapshot]) -> Vec<MoneyLeaderboardEntry> {
+    let mut rows: Vec<MoneyLeaderboardEntry> = players
+        .iter()
+        .map(|p| MoneyLeaderboardEntry {
+            nickname: p.nickname.clone(),
+            team: p.team,
+            gold: p.gold,
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.gold
+            .cmp(&a.gold)
+            .then_with(|| a.nickname.cmp(&b.nickname))
+    });
+    rows.truncate(MONEY_LEADERBOARD_TOP);
+    rows
 }
 
 #[derive(Clone, Serialize)]
@@ -675,6 +705,7 @@ impl SnapshotFrame {
     pub fn for_viewer(&self, viewer_id: Uuid) -> SnapshotOut {
         let viewer_id = viewer_id.to_string();
         let viewer_index = self.player_lookup.get(&viewer_id).copied();
+        let money_leaderboard = money_leaderboard_from_players(&self.players);
 
         let (viewer_index, viewer_x, viewer_z) = match viewer_index {
             Some(index) => {
@@ -692,6 +723,7 @@ impl SnapshotFrame {
                     damage_floats: self.damage_floats.clone(),
                     deaths: self.deaths.clone(),
                     chat: Vec::new(),
+                    money_leaderboard,
                 };
             }
         };
@@ -785,6 +817,7 @@ impl SnapshotFrame {
             damage_floats,
             deaths: self.deaths.clone(),
             chat,
+            money_leaderboard,
         }
     }
 }
@@ -2068,6 +2101,35 @@ mod tests {
             "viewer should keep their own damage event even when it happened far away"
         );
         assert_eq!(view.damage_floats[0].source_id, viewer_id.to_string());
+    }
+
+    #[test]
+    fn money_leaderboard_lists_all_players_by_gold() {
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (a_id, _, _) = sim.join_player("alice".to_string(), Team::Red).expect("join");
+        let (b_id, _, _) = sim.join_player("bob".to_string(), Team::Blue).expect("join");
+        let (c_id, _, _) = sim
+            .join_player("carol".to_string(), Team::Neutral)
+            .expect("join");
+
+        sim.players.get_mut(&a_id).expect("a").gold = 12;
+        sim.players.get_mut(&b_id).expect("b").gold = 99;
+        sim.players.get_mut(&c_id).expect("c").gold = 12;
+
+        let frame = sim.build_snapshot_frame(1);
+        let view = frame.for_viewer(a_id);
+
+        assert_eq!(view.money_leaderboard.len(), 3);
+        assert_eq!(view.money_leaderboard[0].nickname, "bob");
+        assert_eq!(view.money_leaderboard[0].gold, 99);
+        assert_eq!(view.money_leaderboard[1].nickname, "alice");
+        assert_eq!(view.money_leaderboard[1].gold, 12);
+        assert_eq!(view.money_leaderboard[2].nickname, "carol");
+        assert_eq!(view.money_leaderboard[2].gold, 12);
     }
 
     #[test]

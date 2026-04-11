@@ -6,6 +6,7 @@ import {
   ConeGeometry,
   DirectionalLight,
   DoubleSide,
+  Float32BufferAttribute,
   Fog,
   Group,
   HemisphereLight,
@@ -42,6 +43,12 @@ import {
   redWarCampCenterXZ,
 } from "../world/teamTerritory";
 import { SHOP_SAFE_ZONE_COUNT } from "../world/shops";
+import {
+  BIOME_RED_MIN_Z,
+  biomeMountainColor,
+  biomeRockColor,
+  setBiomeGroundColor,
+} from "../world/biomes";
 import { hash2 } from "../utils/math";
 import {
   TERRAIN_HALF_SIZE,
@@ -106,9 +113,6 @@ function addWarCampTerritoryDisks(
   addDisk(bc.x, bc.z, 0x4466cc);
 }
 
-const SAND_COLOR = 0xd7b56d;
-const MOUNTAIN_COLOR = 0x7a5a36;
-const ROCK_COLOR = 0x9a7a4a;
 const CASTLE_STONE_COLOR = 0x8a8780;
 const SKY_COLOR = 0xf6c98a;
 const FOG_NEAR = 120;
@@ -116,6 +120,7 @@ const FOG_FAR = 650;
 const MOUNTAIN_COUNT = 36;
 const SMALL_MOUNTAIN_COUNT = 72;
 const ROCK_COUNT = 140;
+const FOREST_TREE_COUNT = 96;
 
 /**
  * Builds the desert: terrain mesh, sky/fog, lighting, scattered mountains/rocks.
@@ -145,17 +150,25 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   );
   geometry.rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
+  const groundColors = new Float32BufferAttribute(
+    new Float32Array(positions.count * 3),
+    3,
+  );
+  const _gcol = new Color();
   for (let i = 0; i < positions.count; i += 1) {
     const x = positions.getX(i);
     const z = positions.getZ(i);
     positions.setY(i, sampleTerrainHeight(x, z));
+    setBiomeGroundColor(z, _gcol);
+    groundColors.setXYZ(i, _gcol.r, _gcol.g, _gcol.b);
   }
   positions.needsUpdate = true;
+  geometry.setAttribute("color", groundColors);
   geometry.computeVertexNormals();
 
   const ground = new Mesh(
     geometry,
-    new MeshLambertMaterial({ color: SAND_COLOR }),
+    new MeshLambertMaterial({ color: 0xffffff, vertexColors: true }),
   );
   ground.name = "desert-ground";
   scene.add(ground);
@@ -179,7 +192,10 @@ export function buildDesertScene(scene: Scene): DesertWorld {
 
     const cone = new Mesh(
       new ConeGeometry(radius, height, 5),
-      new MeshLambertMaterial({ color: MOUNTAIN_COLOR, flatShading: true }),
+      new MeshLambertMaterial({
+        color: biomeMountainColor(z),
+        flatShading: true,
+      }),
     );
     cone.position.set(x, baseY + height / 2, z);
     scene.add(cone);
@@ -203,7 +219,10 @@ export function buildDesertScene(scene: Scene): DesertWorld {
 
     const cone = new Mesh(
       new ConeGeometry(radius, height, 5),
-      new MeshLambertMaterial({ color: MOUNTAIN_COLOR, flatShading: true }),
+      new MeshLambertMaterial({
+        color: biomeMountainColor(z),
+        flatShading: true,
+      }),
     );
     cone.position.set(x, baseY + height / 2, z);
     scene.add(cone);
@@ -228,7 +247,7 @@ export function buildDesertScene(scene: Scene): DesertWorld {
 
     const rock = new Mesh(
       new BoxGeometry(w, h, d),
-      new MeshLambertMaterial({ color: ROCK_COLOR }),
+      new MeshLambertMaterial({ color: biomeRockColor(z) }),
     );
     rock.position.set(x, baseY + h / 2, z);
     scene.add(rock);
@@ -239,6 +258,50 @@ export function buildDesertScene(scene: Scene): DesertWorld {
       minZ: z - d / 2,
       maxZ: z + d / 2,
       topY: baseY + h,
+    });
+  }
+
+  const trunkMat = new MeshLambertMaterial({ color: 0x5c4030 });
+  const foliageMat = new MeshLambertMaterial({
+    color: 0x2d6a3a,
+    flatShading: true,
+  });
+  const zTreeMin = BIOME_RED_MIN_Z + 16;
+  const zTreeMax = TERRAIN_HALF_SIZE - 22;
+  for (let i = 0; i < FOREST_TREE_COUNT; i += 1) {
+    const x = (hash2(i, 191) - 0.5) * (TERRAIN_HALF_SIZE * 1.85);
+    const z = zTreeMin + hash2(i, 193) * (zTreeMax - zTreeMin);
+    if (isNearAnySafeZoneCastle(x, z, 42)) {
+      continue;
+    }
+    const th = 1.7 + hash2(i, 197) * 0.85;
+    const fr = 1.15 + hash2(i, 199) * 0.95;
+    const fh = 3.2 + hash2(i, 201) * 2.4;
+    const baseY = sampleTerrainHeight(x, z);
+    const trunk = new Mesh(
+      new BoxGeometry(0.38, th, 0.38),
+      trunkMat,
+    );
+    trunk.position.set(x, baseY + th / 2, z);
+    scene.add(trunk);
+    const layers = 2 + (hash2(i, 203) > 0.55 ? 1 : 0);
+    for (let li = 0; li < layers; li += 1) {
+      const ly = baseY + th + li * 1.05;
+      const lr = fr * (1 - li * 0.18);
+      const lh = fh * (1 - li * 0.12);
+      const foliage = new Mesh(
+        new ConeGeometry(lr, lh, 6),
+        foliageMat,
+      );
+      foliage.position.set(x, ly + lh / 2, z);
+      scene.add(foliage);
+    }
+    colliders.push({
+      minX: x - 0.22,
+      maxX: x + 0.22,
+      minZ: z - 0.22,
+      maxZ: z + 0.22,
+      topY: baseY + th,
     });
   }
 

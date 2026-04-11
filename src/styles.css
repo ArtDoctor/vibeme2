@@ -278,6 +278,15 @@ body {
   display: none;
 }
 
+.join-version {
+  margin: 18px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(244, 233, 200, 0.42);
+  user-select: none;
+}
+
 /* ================================================================
    DEATH PANEL
    ================================================================ */
@@ -395,6 +404,166 @@ body {
 
 .hud-coords.hidden {
   display: none;
+}
+
+/* Hurt vignette + incoming damage layer + minimap (Milestone 7 juice) */
+.hud-hurt {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s linear;
+  background: radial-gradient(
+    ellipse at 50% 45%,
+    rgba(80, 0, 0, 0) 35%,
+    rgba(40, 0, 0, 0.55) 100%
+  );
+  mix-blend-mode: multiply;
+}
+
+.hud-float-incoming {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.damage-float--incoming {
+  color: #ff7070;
+  font-size: 17px;
+}
+
+.hud-minimap-wrap {
+  position: absolute;
+  z-index: 3;
+  left: 16px;
+  bottom: 16px;
+  padding: 5px;
+  border-radius: 8px;
+  background: rgba(8, 6, 4, 0.72);
+  border: 1px solid rgba(212, 168, 67, 0.35);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  backdrop-filter: blur(5px);
+}
+
+.hud-minimap {
+  display: block;
+  border-radius: 4px;
+  opacity: 0.95;
+}
+
+.hud-minimap-wrap.hidden {
+  display: none;
+}
+
+/* ================================================================
+   MONEY LEADERBOARD (top-right, below coords)
+   ================================================================ */
+
+.hud-money-lb {
+  position: absolute;
+  z-index: 3;
+  top: 48px;
+  right: 16px;
+  min-width: 168px;
+  max-width: min(240px, calc(100vw - 32px));
+  padding: 8px 10px 10px;
+  background: var(--panel);
+  border: 1px solid var(--gold-border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--cream-muted);
+  pointer-events: none;
+  user-select: none;
+  backdrop-filter: blur(4px);
+}
+
+.hud-money-lb.hidden {
+  display: none;
+}
+
+.hud-money-lb-head {
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(244, 233, 200, 0.72);
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--gold-border);
+}
+
+.hud-money-lb-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-money-lb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.hud-money-lb-rank {
+  flex: 0 0 1.1em;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(244, 233, 200, 0.45);
+}
+
+.hud-money-lb-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+}
+
+.hud-money-lb-dot--red {
+  background: #c85858;
+  box-shadow: 0 0 6px rgba(200, 88, 88, 0.55);
+}
+
+.hud-money-lb-dot--blue {
+  background: #5a78c8;
+  box-shadow: 0 0 6px rgba(90, 120, 200, 0.5);
+}
+
+.hud-money-lb-dot--neutral {
+  background: #9a968c;
+}
+
+.hud-money-lb-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(244, 233, 200, 0.92);
+}
+
+.hud-money-lb-gold {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.hud-money-lb-empty {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(244, 233, 200, 0.42);
+  font-style: italic;
 }
 
 /* ================================================================
@@ -661,6 +830,10 @@ body {
   gap: 5px;
 }
 
+.weapon-bar--flash {
+  filter: drop-shadow(0 0 10px rgba(212, 168, 67, 0.45));
+}
+
 .weapon-slot {
   flex: 1;
   padding: 5px 4px;
@@ -766,6 +939,10 @@ body {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
   padding: 7px 16px;
   background: rgba(0, 0, 0, 0.62);
   border: 1px solid var(--gold-border);
@@ -774,8 +951,11 @@ body {
   color: var(--cream-muted);
   pointer-events: none;
   user-select: none;
-  white-space: nowrap;
   backdrop-filter: blur(4px);
+}
+
+.hud > p:first-of-type {
+  white-space: nowrap;
 }
 
 .hud.hidden {
@@ -785,6 +965,13 @@ body {
 .hud p {
   margin: 0;
   line-height: 1;
+}
+
+.hud-version {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: rgba(244, 233, 200, 0.45);
 }
 
 .hud kbd {

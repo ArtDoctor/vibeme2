@@ -1,4 +1,4 @@
-import { Camera, Vector3 } from "three";
+import { Camera, PerspectiveCamera, Vector3 } from "three";
 
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { horizontalYawFromCamera } from "../combat/constants";
@@ -47,6 +47,12 @@ const THIRD_PERSON_DISTANCE = 3.8;
 const THIRD_PERSON_SIDE_OFFSET = 0.55;
 /** Slight lift so the camera clears the avatar shoulders. */
 const THIRD_PERSON_Y_BIAS = 0.35;
+/** Extra pull-back for death reveal (meters, animated). */
+const DEATH_EXTRA_PULL = 3.15;
+/** FOV bump while death camera is active (degrees). */
+const DEATH_FOV_EXTRA = 9;
+const VIEW_BOB_AMP = 0.038;
+const VIEW_BOB_FREQ = 11.5;
 
 export interface FirstPersonControlsOptions {
   camera: Camera;
@@ -82,7 +88,15 @@ export class FirstPersonControls {
   private readonly scratchFwd = new Vector3();
   private readonly scratchRight = new Vector3();
   private readonly scratchUp = new Vector3(0, 1, 0);
+  private readonly scratchShake = new Vector3();
   private thirdPerson = false;
+  /** Death / revive UI: orbit camera on frozen pose, no movement look. */
+  private deathCameraActive = false;
+  private deathCameraElapsed = 0;
+  private damageShake = 0;
+  private viewBobPhase = 0;
+  private viewWalkActive = false;
+  private readonly baseFov: number;
 
   private keyForward = false;
   private keyBackward = false;
@@ -106,6 +120,8 @@ export class FirstPersonControls {
     this.getPlayerTeam = options.getPlayerTeam;
 
     this.controls = new PointerLockControls(this.camera, this.domElement);
+    this.baseFov =
+      options.camera instanceof PerspectiveCamera ? options.camera.fov : 72;
 
     this.domElement.addEventListener("click", this.onCanvasClick);
     document.addEventListener("keydown", this.onKeyDown);
@@ -149,7 +165,59 @@ export class FirstPersonControls {
     return this.thirdPerson;
   }
 
+  /** Third-person body mesh (R key or death cam). */
+  get shouldShowThirdPersonRig(): boolean {
+    return this.thirdPerson || this.deathCameraActive;
+  }
+
+  get isDeathCameraActive(): boolean {
+    return this.deathCameraActive;
+  }
+
+  /** Death UI: orbit camera, freeze controls separately from chat suppression. */
+  beginDeathCamera(): void {
+    this.deathCameraActive = true;
+    this.deathCameraElapsed = 0;
+    this.thirdPerson = true;
+  }
+
+  endDeathCamera(): void {
+    this.deathCameraActive = false;
+    this.deathCameraElapsed = 0;
+    if (this.camera instanceof PerspectiveCamera) {
+      this.camera.fov = this.baseFov;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  /** Camera kick when taking damage (normalized-ish amount). */
+  addDamageShake(amount: number): void {
+    const a = Math.min(80, Math.max(0, amount));
+    this.damageShake = Math.min(1, this.damageShake + a * 0.028);
+  }
+
   update(delta: number): void {
+    const dt = Math.min(delta, 0.05);
+    this.damageShake = Math.max(0, this.damageShake - dt * 2.5);
+    if (this.deathCameraActive) {
+      this.deathCameraElapsed += dt;
+    }
+
+    const canWalkBob =
+      !this.inputSuppressed &&
+      !this.deathCameraActive &&
+      this.controls.isLocked &&
+      !(this.movementMode.creativeMode && this.movementMode.flyMode) &&
+      this.state.onGround &&
+      (this.keyForward ||
+        this.keyBackward ||
+        this.keyLeft ||
+        this.keyRight);
+    this.viewWalkActive = canWalkBob && !this.thirdPerson;
+    if (this.viewWalkActive) {
+      this.viewBobPhase += dt * VIEW_BOB_FREQ;
+    }
+
     if (this.inputSuppressed) {
       this.applyCameraView();
       this.updateSafeZoneHint();
@@ -262,6 +330,7 @@ export class FirstPersonControls {
   }
 
   dispose(): void {
+    this.endDeathCamera();
     this.domElement.removeEventListener("click", this.onCanvasClick);
     document.removeEventListener("keydown", this.onKeyDown);
     document.removeEventListener("keyup", this.onKeyUp);
@@ -272,13 +341,52 @@ export class FirstPersonControls {
 
   // ---------------------------------------------------------------- private
 
+  private applyDamageShakeOffset(): void {
+    if (this.damageShake <= 1e-4) {
+      return;
+    }
+    const s = this.damageShake * 0.09;
+    this.scratchShake.set(
+      (Math.random() - 0.5) * 2 * s,
+      (Math.random() - 0.5) * 2 * s * 0.55,
+      (Math.random() - 0.5) * 2 * s,
+    );
+    this.camera.position.add(this.scratchShake);
+  }
+
   private applyCameraView(): void {
+    const orbit = this.thirdPerson || this.deathCameraActive;
+
+    if (!orbit) {
+      this.camera.position.copy(this.eyePosition);
+      if (this.viewWalkActive) {
+        this.camera.position.y += Math.sin(this.viewBobPhase) * VIEW_BOB_AMP;
+      }
+      this.applyDamageShakeOffset();
+      if (this.camera instanceof PerspectiveCamera) {
+        this.camera.fov = this.baseFov;
+        this.camera.updateProjectionMatrix();
+      }
+      return;
+    }
+
+    let extra = 0;
+    let fov = this.baseFov;
+    if (this.deathCameraActive) {
+      const u = Math.min(1, this.deathCameraElapsed / 0.42);
+      const ease = u * u * (3 - 2 * u);
+      extra = DEATH_EXTRA_PULL * ease;
+      fov = this.baseFov + DEATH_FOV_EXTRA * ease;
+    }
+    if (this.camera instanceof PerspectiveCamera) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+
     this.camera.position.copy(this.eyePosition);
-    if (!this.thirdPerson) return;
     this.camera.getWorldDirection(this.scratchFwd);
-    this.camera.position
-      .copy(this.eyePosition)
-      .addScaledVector(this.scratchFwd, -THIRD_PERSON_DISTANCE);
+    const dist = THIRD_PERSON_DISTANCE + extra;
+    this.camera.position.addScaledVector(this.scratchFwd, -dist);
     this.scratchRight.crossVectors(this.scratchFwd, this.scratchUp);
     if (this.scratchRight.lengthSq() > 1e-10) {
       this.scratchRight.normalize();
@@ -288,6 +396,7 @@ export class FirstPersonControls {
       );
     }
     this.camera.position.y += THIRD_PERSON_Y_BIAS;
+    this.applyDamageShakeOffset();
   }
 
   private updateSafeZoneHint(): void {

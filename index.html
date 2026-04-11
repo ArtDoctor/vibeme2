@@ -63,6 +63,7 @@
         </fieldset>
         <button id="join-submit" type="button" class="join-submit">Enter the Arena</button>
         <p id="join-error" class="join-error hidden" role="alert"></p>
+        <p class="join-version" id="join-version" aria-label="Build version"></p>
       </div>
 
       <!-- ── DEATH SCREEN ── -->
@@ -78,8 +79,20 @@
       <!-- ── WORLD CANVAS ── -->
       <canvas id="game-canvas"></canvas>
 
+      <div id="hud-hurt" class="hud-hurt" aria-hidden="true"></div>
+      <div id="hud-float-incoming" class="hud-float-incoming" aria-hidden="true"></div>
+      <div id="hud-minimap-wrap" class="hud-minimap-wrap">
+        <canvas id="hud-minimap" class="hud-minimap" width="168" height="168" aria-label="Minimap"></canvas>
+      </div>
+
       <!-- ── COORDS DEBUG ── -->
       <div id="hud-coords" class="hud-coords hidden" aria-live="polite"></div>
+
+      <!-- ── MONEY LEADERBOARD (server ranks) ── -->
+      <div id="hud-money-lb" class="hud-money-lb hidden" aria-live="polite">
+        <div class="hud-money-lb-head">Richest</div>
+        <ol class="hud-money-lb-list" data-money-lb></ol>
+      </div>
 
       <!-- ── COMPASS ── -->
       <div id="hud-compass" class="hud-compass hidden" aria-hidden="true">
@@ -202,6 +215,7 @@
           <kbd>RMB</kbd> block &nbsp;·&nbsp;
           <kbd>Esc</kbd> free mouse
         </p>
+        <p class="hud-version" id="hud-version" aria-label="Build version"></p>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

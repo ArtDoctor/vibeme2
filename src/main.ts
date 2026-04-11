@@ -1,4 +1,5 @@
 import { Game } from "./game/Game";
+import { APP_VERSION } from "./version";
 import {
   clearStoredSession,
   MultiplayerClient,
@@ -19,6 +20,10 @@ const creativeHint = document.getElementById("hud-creative") ?? undefined;
 const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const hudCompass = document.getElementById("hud-compass") ?? undefined;
 const hudCoords = document.getElementById("hud-coords") ?? undefined;
+const hudMoneyLb = document.getElementById("hud-money-lb") ?? undefined;
+const hudHurt = document.getElementById("hud-hurt") ?? undefined;
+const hudFloatIncoming = document.getElementById("hud-float-incoming") ?? undefined;
+const hudMinimap = document.getElementById("hud-minimap");
 const shopPanel = document.getElementById("shop-panel") ?? undefined;
 const hudChat = document.getElementById("hud-chat") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
@@ -28,8 +33,14 @@ const joinError = document.getElementById("join-error");
 const deathPanel = document.getElementById("death-panel");
 const deathRevive = document.getElementById("death-revive");
 const deathMenu = document.getElementById("death-menu");
+const joinVersion = document.getElementById("join-version");
+const hudVersion = document.getElementById("hud-version");
+const versionLabel = `v${APP_VERSION}`;
+if (joinVersion) joinVersion.textContent = versionLabel;
+if (hudVersion) hudVersion.textContent = versionLabel;
 
 let game: Game | undefined;
+let deathPanelTimer: number | undefined;
 const BLOCKED_BROWSER_SHORTCUT_CODES = new Set(["KeyS", "KeyW"]);
 
 function isBlockedBrowserShortcutTarget(target: EventTarget | null): boolean {
@@ -84,6 +95,10 @@ function showDeathPanel(): void {
 }
 
 function hideDeathPanel(): void {
+  if (deathPanelTimer !== undefined) {
+    clearTimeout(deathPanelTimer);
+    deathPanelTimer = undefined;
+  }
   deathPanel?.classList.add("hidden");
 }
 
@@ -120,10 +135,16 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
     const mp = await MultiplayerClient.connect(
       { nickname, session: stored, team: getSelectedJoinTeam() },
       (snap, localPlayerId) => {
-        if (snap.deaths?.includes(localPlayerId)) {
-          showDeathPanel();
-        }
         game?.applyRemoteSnapshot(snap);
+        if (snap.deaths?.includes(localPlayerId)) {
+          if (deathPanelTimer !== undefined) {
+            clearTimeout(deathPanelTimer);
+          }
+          deathPanelTimer = window.setTimeout(() => {
+            showDeathPanel();
+            deathPanelTimer = undefined;
+          }, 1100);
+        }
       },
     );
     game = new Game({
@@ -137,6 +158,10 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       coordsEl: hudCoords,
       shopPanel,
       chatHud: hudChat,
+      moneyLeaderboardEl: hudMoneyLb,
+      hurtOverlay: hudHurt,
+      incomingFloatRoot: hudFloatIncoming,
+      minimapCanvas: hudMinimap instanceof HTMLCanvasElement ? hudMinimap : undefined,
       isChatBlocked: () =>
         deathPanel !== null && !deathPanel.classList.contains("hidden"),
     });

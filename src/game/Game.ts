@@ -1,11 +1,19 @@
 import { Clock, Group, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { horizontalYawFromCamera } from "../combat/constants";
 import type { MultiplayerClient } from "../net/multiplayer";
-import type { InventoryEntry, SnapshotMob, SnapshotMsg, SnapshotPlayer } from "../net/types";
+import type {
+  InventoryEntry,
+  MainHandKind,
+  MoneyLeaderboardEntry,
+  OffHandKind,
+  SnapshotMob,
+  SnapshotMsg,
+  SnapshotPlayer,
+} from "../net/types";
 import { mainHandIsSword } from "../net/types";
 import { CombatInput } from "../player/CombatInput";
 import { FirstPersonControls } from "../player/FirstPersonControls";
-import { buildDesertScene } from "../scene/DesertScene";
+import { buildDesertScene, type DesertWorld } from "../scene/DesertScene";
 import { FirstPersonWeapon } from "./FirstPersonWeapon";
 import { MeleeHitboxVisual } from "./MeleeHitboxVisual";
 import {
@@ -24,6 +32,9 @@ import {
   shopCatalogForSafeZoneIndex,
 } from "../world/shops";
 import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
+import { HitChunkParticles } from "./HitChunkParticles";
+import { MinimapHud } from "./MinimapHud";
+import { ScreenJuice } from "./ScreenJuice";
 
 /**
  * Owns the renderer, scene, camera, animation loop, resize handler, and dispose.
@@ -50,8 +61,16 @@ export interface GameOptions {
   coordsEl?: HTMLElement;
   /** Proximity chat container (`#hud-chat`); multiplayer only. */
   chatHud?: HTMLElement;
+  /** Server richest list (`#hud-money-lb`); multiplayer only. */
+  moneyLeaderboardEl?: HTMLElement;
   /** When true, chat hotkey is ignored (e.g. death screen). */
   isChatBlocked?: () => boolean;
+  /** Red edge vignette (`#hud-hurt`). */
+  hurtOverlay?: HTMLElement;
+  /** Fullscreen layer for incoming damage numbers. */
+  incomingFloatRoot?: HTMLElement;
+  /** Top-down minimap canvas (`#hud-minimap`). */
+  minimapCanvas?: HTMLCanvasElement;
 }
 
 export class Game {
@@ -79,6 +98,16 @@ export class Game {
   private readonly shopPanel?: HTMLElement;
   private readonly coordsEl?: HTMLElement;
   private readonly chatHud: PlayerChatHud | null;
+  private readonly moneyLeaderboardList?: HTMLElement;
+  private readonly world: DesertWorld;
+  private readonly minimapHud: MinimapHud | null;
+  private readonly screenJuice: ScreenJuice | null;
+  private readonly hitParticles: HitChunkParticles | null;
+  private deathUiActive = false;
+  private deathRigSnapshot: SnapshotPlayer | null = null;
+  private weaponFlashUntil = 0;
+  private lastWeaponMain: MainHandKind | undefined;
+  private lastWeaponOff: OffHandKind | null | undefined;
   private shopOpen = false;
   private shopAtIndex: number | null = null;
   private readonly onDocKeydown = (e: KeyboardEvent): void => {
@@ -112,6 +141,7 @@ export class Game {
     this.scene.add(this.camera);
 
     const world = buildDesertScene(this.scene);
+    this.world = world;
 
     this.controls = new FirstPersonControls({
       camera: this.camera,
@@ -137,9 +167,20 @@ export class Game {
       options.localPlayerId !== undefined ? new WorldArrows(this.scene) : null;
     this.worldPickups =
       options.localPlayerId !== undefined ? new WorldPickups(this.scene) : null;
+    this.hitParticles =
+      options.localPlayerId !== undefined
+        ? new HitChunkParticles(this.scene, (x, z) =>
+            world.sampleGroundHeight(x, z),
+          )
+        : null;
     this.worldMobs =
       options.localPlayerId !== undefined
-        ? new WorldMobs(this.scene, this.camera, options.localPlayerId)
+        ? new WorldMobs(
+            this.scene,
+            this.camera,
+            options.localPlayerId,
+            this.hitParticles,
+          )
         : null;
     this.combatInput =
       options.localPlayerId !== undefined
@@ -199,6 +240,28 @@ export class Game {
     if (this.coordsEl) {
       this.coordsEl.classList.remove("hidden");
     }
+    this.moneyLeaderboardList =
+      options.moneyLeaderboardEl?.querySelector("[data-money-lb]") ?? undefined;
+    if (options.moneyLeaderboardEl !== undefined && options.localPlayerId !== undefined) {
+      options.moneyLeaderboardEl.classList.remove("hidden");
+    }
+
+    this.minimapHud =
+      options.minimapCanvas !== undefined && options.localPlayerId !== undefined
+        ? new MinimapHud(options.minimapCanvas, world.worldHalfSize)
+        : null;
+    this.minimapHud?.setVisible(true);
+
+    this.screenJuice =
+      options.hurtOverlay !== undefined &&
+      options.incomingFloatRoot !== undefined &&
+      options.localPlayerId !== undefined
+        ? new ScreenJuice({
+            hurtOverlay: options.hurtOverlay,
+            floatRoot: options.incomingFloatRoot,
+          })
+        : null;
+
     if (this.shopPanel) {
       const closeBtn = this.shopPanel.querySelector("[data-shop-close]");
       if (closeBtn instanceof HTMLButtonElement) {
@@ -268,10 +331,33 @@ export class Game {
     const arrows = msg.arrows ?? [];
     const mobs = msg.mobs ?? [];
     const id = this.localPlayerId;
+    const dyingNow =
+      id !== undefined && (msg.deaths?.includes(id) ?? false);
+    const prevSnap = this.localPlayerSnapshot;
+
     this.localPlayerSnapshot =
       id !== undefined
         ? (players.find((p) => p.id === id) ?? null)
         : null;
+
+    if (
+      prevSnap !== null &&
+      this.localPlayerSnapshot !== null &&
+      this.localPlayerSnapshot.hp < prevSnap.hp
+    ) {
+      this.controls.addDamageShake(prevSnap.hp - this.localPlayerSnapshot.hp);
+      const me = this.localPlayerSnapshot;
+      this.hitParticles?.burst(me.x, me.y - 0.28, me.z, "hurt");
+    }
+
+    if (dyingNow && prevSnap !== null) {
+      this.deathUiActive = true;
+      this.deathRigSnapshot = prevSnap;
+      this.controls.setInputSuppressed(true);
+      this.controls.beginDeathCamera();
+      this.combatInput?.setDeathLocked(true);
+    }
+
     if (this.localPlayerSnapshot) {
       this.combatInput?.syncFromSnapshot(this.localPlayerSnapshot);
     }
@@ -281,7 +367,51 @@ export class Game {
     this.worldMobs?.sync(mobs, msg.damageFloats);
     this.lastMobs = mobs;
     this.chatHud?.mergeFromSnapshot(msg.chat);
+    this.updateMoneyLeaderboard(msg.moneyLeaderboard ?? []);
     this.updateCombatHud(players);
+
+    if (id !== undefined && this.localPlayerSnapshot) {
+      const me = this.localPlayerSnapshot;
+      this.screenJuice?.syncFromSnapshot(
+        id,
+        me.x,
+        me.z,
+        me.hp,
+        msg.damageFloats,
+      );
+    }
+  }
+
+  private updateMoneyLeaderboard(rows: readonly MoneyLeaderboardEntry[]): void {
+    const list = this.moneyLeaderboardList;
+    if (!list) return;
+    list.replaceChildren();
+    if (rows.length === 0) {
+      const p = document.createElement("p");
+      p.className = "hud-money-lb-empty";
+      p.textContent = "No rankings yet";
+      list.appendChild(p);
+      return;
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const li = document.createElement("li");
+      li.className = "hud-money-lb-row";
+      const rank = document.createElement("span");
+      rank.className = "hud-money-lb-rank";
+      rank.textContent = String(i + 1);
+      const dot = document.createElement("span");
+      dot.className = `hud-money-lb-dot hud-money-lb-dot--${r.team}`;
+      const name = document.createElement("span");
+      name.className = "hud-money-lb-name";
+      name.textContent = r.nickname;
+      name.title = r.nickname;
+      const g = document.createElement("span");
+      g.className = "hud-money-lb-gold";
+      g.textContent = `${r.gold}g`;
+      li.append(rank, dot, name, g);
+      list.appendChild(li);
+    }
   }
 
   private updateCombatHud(players: SnapshotMsg["players"]): void {
@@ -367,6 +497,15 @@ export class Game {
     if (this.shopOpen && this.shopPanel && this.shopAtIndex !== null) {
       this.renderShopOffers(me, this.shopAtIndex);
     }
+
+    if (
+      this.lastWeaponMain !== undefined &&
+      (mainHand !== this.lastWeaponMain || offHand !== this.lastWeaponOff)
+    ) {
+      this.weaponFlashUntil = performance.now() + 420;
+    }
+    this.lastWeaponMain = mainHand;
+    this.lastWeaponOff = offHand;
   }
 
   private toggleShopPanel(): void {
@@ -481,6 +620,15 @@ export class Game {
       this.remotePlayers?.update();
       this.worldPickups?.update(delta);
       this.worldMobs?.update(delta);
+      this.hitParticles?.update(delta);
+      this.screenJuice?.update(delta);
+      const wBar = this.hudCombat?.querySelector(".weapon-bar");
+      if (wBar instanceof HTMLElement) {
+        wBar.classList.toggle(
+          "weapon-bar--flash",
+          performance.now() < this.weaponFlashUntil,
+        );
+      }
       const eye = this.controls.getNetworkPose();
       const coordsHud = this.coordsEl;
       if (coordsHud) {
@@ -494,15 +642,46 @@ export class Game {
         eye.z,
         this.lastMobs,
       );
-      const thirdPerson = this.controls.isThirdPerson;
-      if (this.firstPersonWeapon && this.localPlayerSnapshot && this.combatInput) {
+      if (this.localPlayerId) {
+        this.minimapHud?.update(
+          eye.x,
+          eye.z,
+          horizontalYawFromCamera(this.camera),
+          this.lastMobs,
+        );
+      }
+      const thirdShow = this.controls.shouldShowThirdPersonRig;
+      if (
+        this.firstPersonWeapon &&
+        this.localPlayerSnapshot &&
+        this.combatInput &&
+        !this.deathUiActive
+      ) {
         this.firstPersonWeapon.sync(this.localPlayerSnapshot, this.combatInput);
-        this.firstPersonWeapon.setVisible(!thirdPerson);
+        this.firstPersonWeapon.setVisible(!thirdShow);
       } else {
         this.firstPersonWeapon?.setVisible(false);
       }
-      if (
-        thirdPerson &&
+      if (this.deathUiActive && this.deathRigSnapshot && this.localThirdPersonRig) {
+        this.localThirdPersonRig.visible = true;
+        const pose = this.controls.getNetworkPose();
+        const frozen = this.deathRigSnapshot;
+        const p: SnapshotPlayer = {
+          ...frozen,
+          x: pose.x,
+          y: pose.y,
+          z: pose.z,
+          yaw: pose.yaw,
+          pitch: pose.pitch,
+        };
+        const gy = this.world.sampleGroundHeight(pose.x, pose.z);
+        updatePlayerAvatarRig(this.localThirdPersonRig, p, {
+          viewCamera: this.camera,
+          lieDead: true,
+          groundFeetY: gy,
+        });
+      } else if (
+        thirdShow &&
         this.localThirdPersonRig &&
         this.localPlayerSnapshot &&
         this.combatInput
@@ -529,11 +708,13 @@ export class Game {
       } else if (this.localThirdPersonRig) {
         this.localThirdPersonRig.visible = false;
       }
-      this.meleeHitboxVisual?.update(
-        this.controls.getNetworkPose(),
-        this.localPlayerSnapshot,
-        this.combatInput,
-      );
+      if (!this.deathUiActive) {
+        this.meleeHitboxVisual?.update(
+          this.controls.getNetworkPose(),
+          this.localPlayerSnapshot,
+          this.combatInput,
+        );
+      }
       this.renderer.render(this.scene, this.camera);
     };
     this.animationId = requestAnimationFrame(loop);
@@ -556,6 +737,9 @@ export class Game {
     this.worldMobs?.dispose();
     this.compassHud?.dispose();
     this.chatHud?.dispose();
+    this.minimapHud?.dispose();
+    this.screenJuice?.dispose();
+    this.hitParticles?.dispose();
     this.coordsEl?.classList.add("hidden");
     if (this.localThirdPersonRig) {
       this.scene.remove(this.localThirdPersonRig);

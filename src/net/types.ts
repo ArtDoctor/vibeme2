@@ -144,6 +144,13 @@ export interface SnapshotChatMessage {
   sentAtUnixMs: number;
 }
 
+/** Global richest list; authoritative from the server (same for every client). */
+export interface MoneyLeaderboardEntry {
+  nickname: string;
+  team: PlayerTeam;
+  gold: number;
+}
+
 export interface SnapshotMsg {
   type: "snapshot";
   tick: number;
@@ -160,4 +167,6 @@ export interface SnapshotMsg {
   deaths?: readonly string[];
   /** Omitted when no chat lines in range this tick. */
   chat?: readonly SnapshotChatMessage[];
+  /** Omitted by older servers; default to empty. */
+  moneyLeaderboard?: readonly MoneyLeaderboardEntry[];
 }

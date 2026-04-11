@@ -228,27 +228,68 @@ export function createPlayerAvatarRig(nickname: string): Group {
   return root;
 }
 
+export interface AvatarRigUpdateOpts {
+  viewCamera?: Camera;
+  /** Prone corpse on the ground — uses `groundFeetY` instead of snapshot height. */
+  lieDead?: boolean;
+  groundFeetY?: number;
+}
+
 export function updatePlayerAvatarRig(
   g: Group,
   p: SnapshotPlayer,
-  opts?: { viewCamera?: Camera },
+  opts?: AvatarRigUpdateOpts,
 ): void {
-  const feetY = p.y - EYE_HEIGHT;
-  g.position.set(p.x, feetY, p.z);
-  if (opts?.viewCamera) {
-    const cam = opts.viewCamera;
-    cam.updateMatrixWorld(true);
-    cam.getWorldDirection(viewFacingScratch);
-    viewFacingScratch.y = 0;
-    const lenSq = viewFacingScratch.lengthSq();
-    if (lenSq > 1e-10) {
-      viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
-      g.rotation.y = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+  if (opts?.lieDead === true && opts.groundFeetY !== undefined) {
+    const gy = opts.groundFeetY;
+    g.position.set(p.x, gy + 0.07, p.z);
+    g.rotation.order = "YXZ";
+    let yaw = avatarRotationYFromCombatYaw(p.yaw);
+    if (opts.viewCamera) {
+      const cam = opts.viewCamera;
+      cam.updateMatrixWorld(true);
+      cam.getWorldDirection(viewFacingScratch);
+      viewFacingScratch.y = 0;
+      const lenSq = viewFacingScratch.lengthSq();
+      if (lenSq > 1e-10) {
+        viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
+        yaw = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+      }
+    }
+    g.rotation.y = yaw;
+    g.rotation.x = Math.PI / 2 - 0.09;
+    g.rotation.z = 0;
+    for (const ch of g.children) {
+      if (ch instanceof Sprite) {
+        ch.visible = false;
+      }
+    }
+  } else {
+    g.rotation.order = "XYZ";
+    g.rotation.x = 0;
+    g.rotation.z = 0;
+    const feetY = p.y - EYE_HEIGHT;
+    g.position.set(p.x, feetY, p.z);
+    for (const ch of g.children) {
+      if (ch instanceof Sprite) {
+        ch.visible = true;
+      }
+    }
+    if (opts?.viewCamera) {
+      const cam = opts.viewCamera;
+      cam.updateMatrixWorld(true);
+      cam.getWorldDirection(viewFacingScratch);
+      viewFacingScratch.y = 0;
+      const lenSq = viewFacingScratch.lengthSq();
+      if (lenSq > 1e-10) {
+        viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
+        g.rotation.y = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+      } else {
+        g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
+      }
     } else {
       g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
     }
-  } else {
-    g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
   }
 
   const sword = g.userData.sword as Group;

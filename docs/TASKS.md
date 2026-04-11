@@ -171,26 +171,29 @@ runs; server is authoritative; client keeps only a session token in
 
 ## Milestone 7 — Polish and content
 
-- [~] Bigger world, multiple biomes (still desert-themed for v1).
-      Current state: the desert bounds are now 3x larger in each direction with
-      more procedural mountains and rocks; biome/content variety is still todo.
+- [x] Bigger world, multiple biomes (still desert-themed for v1).
+      Desert bounds are 3× in each direction; **three horizontal strips along Z**:
+      south **winter** (blue team / south war camp), center **sand**, north **forest**
+      (red team) with procedural trees — see `src/world/biomes.ts` + `DesertScene.ts`.
 - [ ] **Safe zones vs chaos zones**: divide the map so **safe zones** are a
       minority of the area (spawn castles). The **chaos
       zones** — everywhere else — pack heavy mob and boss presence. Survival
       there should push players to **move fast** or **group up**; solo slow
       play in the open should be punishing. Server rules for aggro, spawn
       density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs. Make the mobs by default follow the player, but if the players are in safe zone, mobs should keep distances from safe zones.
-- [ ] **Juice and feedback**: view bob, hit/blood VFX, blood or vignette on screen edges
-      when hurt, clear animations for weapon switches, enemy attacks, and other actions —
-      every action should read with motion and effects.
-- [ ] Minimap.
+- [x] **Juice and feedback**: view bob (FP walk), damage camera shake, hurt vignette,
+      weapon-bar flash on loadout change, incoming damage numbers when hit (PvP floats);
+      **death**: freeze pose, forced third-person, prone body on terrain, extra pull + FOV
+      reveal (`FirstPersonControls`, `Game`, `ScreenJuice`, `RemotePlayers`).
+- [x] Minimap: world + biome bands, safe zones, player heading, mob dots (`MinimapHud.ts`).
 
 ---
 
 ## Milestone 8 — Engineering, QA, and maintainability
 
-- [ ] **Versions**: automatic version bump on push/build/CI if feasible; **minimum** a
-      simple version file in the repo root that release/deploy must not forget to update.
+- [x] **Versions**: repo-root `VERSION` is the release id (must match `package.json`
+      `"version"`; `npm run check:version` / `smoke:ci` enforce). Vite inlines it into the
+      client bundle; join screen + bottom HUD show `v…` for support/debugging.
 - [~] **More automated testing**: expand coverage; **rigorous server-side tests** that
       exercise the simulated world (e.g. track object coordinates and state across ticks)
       so regressions in authority/simulation are caught early.

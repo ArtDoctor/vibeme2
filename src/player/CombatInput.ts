@@ -38,6 +38,8 @@ export class CombatInput {
   private ownedBow = false;
   private invSnapshot: readonly InventoryEntry[] = [];
   private chatSuppressed = false;
+  /** Death screen — no attacks or weapon swaps. */
+  private deathLocked = false;
 
   constructor(
     private readonly domElement: HTMLElement,
@@ -60,9 +62,18 @@ export class CombatInput {
     }
   }
 
+  setDeathLocked(locked: boolean): void {
+    this.deathLocked = locked;
+    if (locked) {
+      this.blocking = false;
+      this.bowCharging = false;
+      this.bowCharge = 0;
+    }
+  }
+
   /** Call each frame before networking send; `dt` is seconds. */
   update(dt: number): void {
-    if (this.chatSuppressed) return;
+    if (this.chatSuppressed || this.deathLocked) return;
     const locked = this.isPointerLocked();
     if (!locked) {
       this.blocking = false;
@@ -78,6 +89,16 @@ export class CombatInput {
   }
 
   consumeOutbound(): CombatOutbound {
+    if (this.deathLocked) {
+      return {
+        mainHand: this.mainHand,
+        offHand: this.offHand,
+        blocking: false,
+        bowCharge: 0,
+        swing: false,
+        fireArrow: false,
+      };
+    }
     const swing = this.swingPending;
     const fireArrow = this.firePending;
     this.swingPending = false;
@@ -116,6 +137,9 @@ export class CombatInput {
   }
 
   syncFromSnapshot(player: SnapshotPlayer): void {
+    if (this.deathLocked) {
+      return;
+    }
     this.invSnapshot = player.inventory;
     this.ownedShield = hasInventoryItem(player.inventory, "basicShield");
     this.ownedBow = hasInventoryItem(player.inventory, "shortBow");
@@ -151,7 +175,7 @@ export class CombatInput {
   }
 
   private readonly onMouseDown = (e: MouseEvent): void => {
-    if (this.chatSuppressed) return;
+    if (this.chatSuppressed || this.deathLocked) return;
     if (!this.isPointerLocked()) return;
     if (e.button === 0) {
       if (mainHandIsSword(this.mainHand)) {
@@ -171,7 +195,7 @@ export class CombatInput {
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (this.chatSuppressed) return;
+    if (this.chatSuppressed || this.deathLocked) return;
     if (e.button === 0 && this.mainHand === "shortBow" && this.bowCharging) {
       this.bowCharging = false;
       if (this.bowCharge >= BOW_MIN_CHARGE) {
@@ -186,7 +210,7 @@ export class CombatInput {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (this.chatSuppressed) return;
+    if (this.chatSuppressed || this.deathLocked) return;
     if (this.applyWeaponKeyCode(e.code)) {
       e.preventDefault();
       return;

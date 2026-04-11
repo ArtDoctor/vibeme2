@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "smoke:ci": "node scripts/smoke-ci.mjs",
+    "check:version": "node scripts/check-version.mjs",
+    "smoke:ci": "node scripts/check-version.mjs && node scripts/smoke-ci.mjs",
     "server": "node scripts/kill-stale-server.mjs && cargo run --manifest-path server/Cargo.toml"
   },
   "dependencies": {

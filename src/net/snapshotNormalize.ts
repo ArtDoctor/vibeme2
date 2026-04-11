@@ -9,6 +9,7 @@ import type {
   ArmorSlots,
   DamageFloatEvent,
   SnapshotChatMessage,
+  MoneyLeaderboardEntry,
   InventoryEntry,
   InventoryItemKind,
   MainHandKind,
@@ -227,6 +228,18 @@ export function normalizeSnapshotMob(raw: unknown): SnapshotMob {
   };
 }
 
+export function normalizeMoneyLeaderboardEntry(raw: unknown): MoneyLeaderboardEntry {
+  const o =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    nickname: str(o.nickname, ""),
+    team: normalizePlayerTeam(o.team),
+    gold: Math.max(0, Math.floor(num(o.gold, 0))),
+  };
+}
+
 export function normalizeSnapshotChatMessage(raw: unknown): SnapshotChatMessage {
   const o =
     raw !== null && typeof raw === "object"
@@ -341,6 +354,11 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
     ? chatIn.map(normalizeSnapshotChatMessage).filter((c) => c.id.length > 0)
     : undefined;
 
+  const moneyLbIn = o.moneyLeaderboard;
+  const moneyLeaderboard: MoneyLeaderboardEntry[] = Array.isArray(moneyLbIn)
+    ? moneyLbIn.map(normalizeMoneyLeaderboardEntry)
+    : [];
+
   return {
     type: "snapshot",
     tick,
@@ -353,5 +371,6 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
       : {}),
     ...(deaths !== undefined && deaths.length > 0 ? { deaths } : {}),
     ...(chat !== undefined && chat.length > 0 ? { chat } : {}),
+    ...(moneyLeaderboard.length > 0 ? { moneyLeaderboard } : {}),
   };
 }
