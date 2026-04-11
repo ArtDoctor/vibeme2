@@ -12,9 +12,16 @@ import {
 } from "three";
 import { avatarRotationYFromCombatYaw } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
-import type { SnapshotPlayer, WeaponKind } from "../net/types";
+import type {
+  ArmorPieceKind,
+  SnapshotPlayer,
+} from "../net/types";
 import { lerpAngle, shortestAngleDelta } from "../utils/math";
-import { animateWeaponGroups, buildWeaponGroupsThirdPerson, setWeaponVisible } from "./weaponModels";
+import {
+  animateWeaponGroups,
+  buildWeaponGroupsThirdPerson,
+  setWeaponVisible,
+} from "./weaponModels";
 
 /** Renders this far behind newest sample so two arrivals usually bracket render time. */
 const INTERP_DELAY_MS = 110;
@@ -31,7 +38,8 @@ function lerpSnapshotPlayer(
   t: number,
 ): SnapshotPlayer {
   const u = Math.min(1, Math.max(0, t));
-  const weapon: WeaponKind = u >= 0.5 ? b.weapon : a.weapon;
+  const mainHand = u >= 0.5 ? b.mainHand : a.mainHand;
+  const offHand = u >= 0.5 ? b.offHand : a.offHand;
   const blocking = u >= 0.5 ? b.blocking : a.blocking;
   return {
     id: b.id,
@@ -44,7 +52,11 @@ function lerpSnapshotPlayer(
     hp: a.hp + (b.hp - a.hp) * u,
     stamina: a.stamina + (b.stamina - a.stamina) * u,
     gold: a.gold + (b.gold - a.gold) * u,
-    weapon,
+    mainHand,
+    offHand,
+    armor: u >= 0.5 ? b.armor : a.armor,
+    inventory: u >= 0.5 ? b.inventory : a.inventory,
+    weapon: u >= 0.5 ? b.weapon : a.weapon,
     blocking,
     bowCharge: a.bowCharge + (b.bowCharge - a.bowCharge) * u,
     swingT: a.swingT + (b.swingT - a.swingT) * u,
@@ -111,6 +123,7 @@ function resolveInterpolatedPlayer(
 const TORSO_MAT = new MeshLambertMaterial({ color: 0x4a8c6a });
 const HEAD_MAT = new MeshLambertMaterial({ color: 0xe8c4a0 });
 const LIMB_MAT = new MeshLambertMaterial({ color: 0x3d7358 });
+const ARMOR_MAT = new MeshLambertMaterial({ color: 0x9f8451 });
 
 function makeNicknameSprite(nickname: string): Sprite {
   const canvas = document.createElement("canvas");
@@ -157,6 +170,15 @@ export function createPlayerAvatarRig(nickname: string): Group {
   leftArm.position.set(-0.38, 0.58, 0);
   const rightArm = new Mesh(new BoxGeometry(0.14, 0.55, 0.14), LIMB_MAT);
   rightArm.position.set(0.38, 0.58, 0);
+  const helm = new Mesh(new BoxGeometry(0.42, 0.18, 0.42), ARMOR_MAT);
+  helm.position.y = 1.22;
+  helm.visible = false;
+  const chest = new Mesh(new BoxGeometry(0.6, 0.82, 0.38), ARMOR_MAT);
+  chest.position.y = 0.52;
+  chest.visible = false;
+  const tassets = new Mesh(new BoxGeometry(0.5, 0.22, 0.3), ARMOR_MAT);
+  tassets.position.y = 0.1;
+  tassets.visible = false;
 
   const { sword, shield, bow } = buildWeaponGroupsThirdPerson();
   sword.name = "sword";
@@ -167,6 +189,9 @@ export function createPlayerAvatarRig(nickname: string): Group {
   root.add(head);
   root.add(leftArm);
   root.add(rightArm);
+  root.add(helm);
+  root.add(chest);
+  root.add(tassets);
   root.add(sword);
   root.add(shield);
   root.add(bow);
@@ -175,6 +200,9 @@ export function createPlayerAvatarRig(nickname: string): Group {
   root.userData.sword = sword;
   root.userData.shield = shield;
   root.userData.bow = bow;
+  root.userData.helm = helm;
+  root.userData.chestArmor = chest;
+  root.userData.tassets = tassets;
   return root;
 }
 
@@ -186,9 +214,15 @@ export function updatePlayerAvatarRig(g: Group, p: SnapshotPlayer): void {
   const sword = g.userData.sword as Group;
   const shield = g.userData.shield as Group;
   const bow = g.userData.bow as Group;
+  const helm = g.userData.helm as Mesh | undefined;
+  const chest = g.userData.chestArmor as Mesh | undefined;
+  const tassets = g.userData.tassets as Mesh | undefined;
 
-  setWeaponVisible(sword, shield, bow, p.weapon);
+  setWeaponVisible(sword, shield, bow, p.mainHand, p.offHand);
   animateWeaponGroups(sword, shield, bow, p);
+  if (helm) helm.visible = hasArmorPiece(p.armor.head, "scoutHelm");
+  if (chest) chest.visible = hasArmorPiece(p.armor.chest, "scoutChest");
+  if (tassets) tassets.visible = hasArmorPiece(p.armor.legs, "scoutLegs");
 }
 
 /**
@@ -276,4 +310,11 @@ export class RemotePlayers {
   private updateRig(g: Group, p: SnapshotPlayer): void {
     updatePlayerAvatarRig(g, p);
   }
+}
+
+function hasArmorPiece(
+  current: ArmorPieceKind | null,
+  expected: ArmorPieceKind,
+): boolean {
+  return current === expected;
 }

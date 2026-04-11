@@ -2,6 +2,25 @@
 //! `scene/DesertScene.ts`). Colliders must stay in sync — see `docs/ARCHITECTURE.md`.
 
 pub const TERRAIN_HALF_SIZE: f64 = 600.0;
+/// Half-extent of each PvP-safe courtyard (matches `SPAWN_SAFE_ZONE_HALF` in `spawnSafeZone.ts`).
+pub const SPAWN_SAFE_ZONE_HALF: f64 = 5.0;
+/// Inset from the terrain edge for corner/north outposts (matches `SAFE_ZONE_EDGE_INSET`).
+pub const SAFE_ZONE_EDGE_INSET: f64 = 15.0;
+
+/// Axis-aligned safe zones `(min_x, max_x, min_z, max_z)` — same layout as `ALL_SPAWN_SAFE_ZONE_AABBS` in `spawnSafeZone.ts`.
+pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 6] = {
+    let h = SPAWN_SAFE_ZONE_HALF;
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    [
+        (-h, h, -h, h),
+        (-h, h, e - h, e + h),
+        (-e - h, -e + h, e - h, e + h),
+        (e - h, e + h, e - h, e + h),
+        (-e - h, -e + h, -e - h, -e + h),
+        (e - h, e + h, -e - h, -e + h),
+    ]
+};
+
 pub const EYE_HEIGHT: f64 = 1.65;
 pub const PLAYER_RADIUS: f64 = 0.35;
 pub const MAX_STEP_UP: f64 = 0.6;
@@ -64,7 +83,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         let i_f = f64::from(i);
         let x = (hash2(i_f, 71.0) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
         let z = (hash2(i_f, 83.0) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
-        if (x * x + z * z).sqrt() < 22.0 {
+        if near_any_safe_zone_castle(x, z, 32.0) {
             continue;
         }
         let radius = 3.0 + hash2(i_f, 97.0) * 5.0;
@@ -84,7 +103,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         let i_f = f64::from(i);
         let x = (hash2(i_f, 5.0) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
         let z = (hash2(i_f, 7.0) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
-        if (x * x + z * z).sqrt() < 14.0 {
+        if near_any_safe_zone_castle(x, z, 28.0) {
             continue;
         }
         let w = 0.8 + hash2(i_f, 17.0) * 1.6;
@@ -100,8 +119,30 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         });
     }
 
-    add_spawn_castle(&mut colliders);
+    let out_e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    add_spawn_castle(&mut colliders, 0.0, 0.0);
+    add_spawn_castle(&mut colliders, 0.0, out_e);
+    add_spawn_castle(&mut colliders, -out_e, out_e);
+    add_spawn_castle(&mut colliders, out_e, out_e);
+    add_spawn_castle(&mut colliders, -out_e, -out_e);
+    add_spawn_castle(&mut colliders, out_e, -out_e);
     colliders
+}
+
+/// Matches `isNearAnySafeZoneCastle` in `spawnSafeZone.ts` (procedural clearance).
+fn near_any_safe_zone_castle(x: f64, z: f64, radius: f64) -> bool {
+    if (x * x + z * z).sqrt() < radius {
+        return true;
+    }
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    for &(cx, cz) in &[(0.0, e), (-e, e), (e, e), (-e, -e), (e, -e)] {
+        let dx = x - cx;
+        let dz = z - cz;
+        if (dx * dx + dz * dz).sqrt() < radius {
+            return true;
+        }
+    }
+    false
 }
 
 /// `SPAWN_COURTYARD_HALF`, `CASTLE_*` in `world/spawnSafeZone.ts`.
@@ -110,7 +151,7 @@ const CASTLE_WALL_THICKNESS: f64 = 0.6;
 const CASTLE_WALL_HEIGHT: f64 = 3.5;
 const CASTLE_GATE_HALF_WIDTH: f64 = 1.5;
 
-fn add_spawn_castle(colliders: &mut Vec<AabbCollider>) {
+fn add_spawn_castle(colliders: &mut Vec<AabbCollider>, center_x: f64, center_z: f64) {
     let half = SPAWN_COURTYARD_HALF;
     let t = CASTLE_WALL_THICKNESS;
     let h = CASTLE_WALL_HEIGHT;
@@ -128,23 +169,23 @@ fn add_spawn_castle(colliders: &mut Vec<AabbCollider>) {
         });
     };
 
-    let east_x = half + t / 2.0;
-    add_segment(east_x, 0.0, t, wall_z_span);
+    let east_x = center_x + half + t / 2.0;
+    add_segment(east_x, center_z, t, wall_z_span);
 
-    let west_x = -half - t / 2.0;
-    add_segment(west_x, 0.0, t, wall_z_span);
+    let west_x = center_x - half - t / 2.0;
+    add_segment(west_x, center_z, t, wall_z_span);
 
-    let north_z = half + t / 2.0;
-    add_segment(0.0, north_z, wall_x_span, t);
+    let north_z = center_z + half + t / 2.0;
+    add_segment(center_x, north_z, wall_x_span, t);
 
-    let south_z = -half - t / 2.0;
-    let south_west_outer = -half - t;
-    let south_east_outer = half + t;
+    let south_z = center_z - half - t / 2.0;
+    let south_west_outer = center_x - half - t;
+    let south_east_outer = center_x + half + t;
     let gate_half = CASTLE_GATE_HALF_WIDTH;
-    let south_left_w = -gate_half - south_west_outer;
-    let south_right_w = south_east_outer - gate_half;
-    let south_left_cx = (south_west_outer + -gate_half) / 2.0;
-    let south_right_cx = (gate_half + south_east_outer) / 2.0;
+    let south_left_w = (center_x - gate_half) - south_west_outer;
+    let south_right_w = south_east_outer - (center_x + gate_half);
+    let south_left_cx = (south_west_outer + (center_x - gate_half)) / 2.0;
+    let south_right_cx = ((center_x + gate_half) + south_east_outer) / 2.0;
     add_segment(south_left_cx, south_z, south_left_w, t);
     add_segment(south_right_cx, south_z, south_right_w, t);
 }

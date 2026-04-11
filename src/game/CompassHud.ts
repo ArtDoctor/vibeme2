@@ -1,12 +1,16 @@
 import type { SnapshotMob } from "../net/types";
 
-/** Pixels the cardinal strip shifts per full world turn (tuned to cell width). */
-const COMPASS_PX_PER_2PI = 208;
-const CELL_PX = 52;
-/** First "N" in the strip is at index 1 (after W); center that cell under the pointer when facing north. */
-const FIRST_N_CENTER_PX = CELL_PX * 1.5;
+/** Fallback if layout not ready (must match `.hud-compass` `--compass-cell-w` in CSS). */
+const CELL_PX_FALLBACK = 583;
+/** Repeated W–N–E–S blocks; must cover lead alignment + shift range (see `update`). */
+const COMPASS_STRIP_CYCLES = 28;
 const ENEMY_DETECT_RADIUS = 48;
 const MAX_ENEMY_MARKERS = 10;
+
+function modTau(yaw: number): number {
+  const tau = 2 * Math.PI;
+  return ((yaw % tau) + tau) % tau;
+}
 
 function wrapAngleRad(a: number): number {
   let x = a;
@@ -58,7 +62,7 @@ export class CompassHud {
 
     const cardinals = ["W", "N", "E", "S"] as const;
     const cells: string[] = [];
-    for (let r = 0; r < 5; r += 1) {
+    for (let r = 0; r < COMPASS_STRIP_CYCLES; r += 1) {
       for (const c of cardinals) {
         cells.push(`<span class="hud-compass-cell">${c}</span>`);
       }
@@ -80,11 +84,31 @@ export class CompassHud {
     pz: number,
     mobs: readonly SnapshotMob[],
   ): void {
-    const shift = (yaw / (2 * Math.PI)) * COMPASS_PX_PER_2PI;
     const inner = this.track.querySelector(".hud-compass-track-inner");
     if (inner instanceof HTMLElement) {
+      const first = inner.firstElementChild;
+      let cellW = CELL_PX_FALLBACK;
+      if (first instanceof HTMLElement) {
+        const w = first.offsetWidth;
+        if (w > 0) cellW = w;
+      } else {
+        const raw = getComputedStyle(this.root).getPropertyValue("--compass-cell-w").trim();
+        const parsed = parseFloat(raw);
+        if (Number.isFinite(parsed) && parsed > 0) cellW = parsed;
+      }
+      const cyclePx = cellW * 4;
+      const nCenterPx = cellW * 1.5;
       const halfW = this.track.clientWidth * 0.5;
-      inner.style.transform = `translateX(${halfW - FIRST_N_CENTER_PX - shift}px)`;
+      /** When `halfW > nCenterPx`, anchoring to the first N leaves empty space on the left; use a deeper cycle. */
+      const alignCycle = Math.min(
+        Math.max(0, Math.ceil((halfW - nCenterPx) / cyclePx)),
+        COMPASS_STRIP_CYCLES - 3,
+      );
+      const northCenterPx = alignCycle * cyclePx + nCenterPx;
+      const wrappedYaw = modTau(yaw);
+      const shift = (wrappedYaw / (2 * Math.PI)) * cyclePx;
+      const tx = halfW - northCenterPx - shift;
+      inner.style.transform = `translateX(${tx}px)`;
     }
 
     const scored = mobs

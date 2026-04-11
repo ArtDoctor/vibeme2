@@ -50,12 +50,13 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
       box. Charge-up + release. Spawns a small box "arrow" projectile.
 - [x] Player HP, stamina, hitbox (capsule approximated as cylinder for now).
 - [x] Death = full reset to spawn, drop everything, lose all gold and gear.
-- [ ] **Shield as off-hand with one-handed sword**: equip both at once (second-hand
+- [x] **Shield as off-hand with one-handed sword**: equip both at once (second-hand
       shield while swinging sword), not either/or only.
-- [ ] **Starter loadout at base**: by default players can pick up / spawn with only a
+- [x] **Starter loadout at base**: by default players can pick up / spawn with only a
       **wooden sword**; shields, bows, better weapons, and armor come from map loot,
-      mobs, shops, and other progression (see Milestone 4).
-- [ ] **Armor**: equip slots, stat effects, and **appearance/skin** changes per piece or set.
+      mobs, shops, and other progression (see Milestone 4). Current state: the map
+      refills basic shield/bow/armor pickups back up to global target counts.
+- [x] **Armor**: equip slots, stat effects, and **appearance/skin** changes per piece or set.
 - [ ] **Weapon durability** (optional): weapons wear with use; balance with economy if added.
 
 ## Milestone 3 — Mobs

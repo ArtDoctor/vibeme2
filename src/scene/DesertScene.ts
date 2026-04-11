@@ -15,9 +15,11 @@ import {
   CASTLE_GATE_HALF_WIDTH,
   CASTLE_WALL_HEIGHT,
   CASTLE_WALL_THICKNESS,
+  SAFE_ZONE_OUTPOST_EDGE_CENTER,
   SPAWN_COURTYARD_HALF,
   SPAWN_SAFE_ZONE_AABB,
   type SpawnSafeZoneAabb,
+  isNearAnySafeZoneCastle,
   isPointInSpawnSafeZone,
 } from "../world/spawnSafeZone";
 import { hash2 } from "../utils/math";
@@ -146,7 +148,7 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   for (let i = 0; i < SMALL_MOUNTAIN_COUNT; i += 1) {
     const x = (hash2(i, 71) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
     const z = (hash2(i, 83) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
-    if (Math.hypot(x, z) < 22) continue; // keep spawn + castle clear
+    if (isNearAnySafeZoneCastle(x, z, 32)) continue;
     const radius = 3 + hash2(i, 97) * 5;
     const height = 5 + hash2(i, 113) * 8;
     const baseY = sampleTerrainHeight(x, z);
@@ -170,7 +172,7 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   for (let i = 0; i < ROCK_COUNT; i += 1) {
     const x = (hash2(i, 5) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
     const z = (hash2(i, 7) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
-    if (Math.hypot(x, z) < 14) continue;
+    if (isNearAnySafeZoneCastle(x, z, 28)) continue;
     const w = 0.8 + hash2(i, 17) * 1.6;
     const h = 0.6 + hash2(i, 19) * 1.4;
     const d = 0.8 + hash2(i, 29) * 1.6;
@@ -192,9 +194,14 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     });
   }
 
-  // Safe spawn castle — docs/TASKS.md → Milestone 1.5. Server-side damage/aggro/spawn
-  // checks must use `spawnSafeZoneAabb` / `isPointInSpawnSafeZone` from `world/spawnSafeZone.ts`.
+  // Safe spawn castles — server-side damage/aggro/spawn checks must match `isPointInSpawnSafeZone`.
+  const outE = SAFE_ZONE_OUTPOST_EDGE_CENTER;
   addSpawnCastle(scene, colliders, sampleTerrainHeight);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, 0, outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, -outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, -outE);
 
   // TODO(multiplayer): shops, NPCs, mob spawners, boss arenas, team flags.
   // TODO(content): replace cones with proper mountain meshes once art exists.
@@ -219,6 +226,8 @@ function addSpawnCastle(
   scene: Scene,
   colliders: AABBCollider[],
   sampleGround: (x: number, z: number) => number,
+  centerX = 0,
+  centerZ = 0,
 ): void {
   const half = SPAWN_COURTYARD_HALF;
   const t = CASTLE_WALL_THICKNESS;
@@ -246,23 +255,23 @@ function addSpawnCastle(
     });
   };
 
-  const eastX = half + t / 2;
-  addSegment(eastX, 0, t, wallZSpan);
+  const eastX = centerX + half + t / 2;
+  addSegment(eastX, centerZ, t, wallZSpan);
 
-  const westX = -half - t / 2;
-  addSegment(westX, 0, t, wallZSpan);
+  const westX = centerX - half - t / 2;
+  addSegment(westX, centerZ, t, wallZSpan);
 
-  const northZ = half + t / 2;
-  addSegment(0, northZ, wallXSpan, t);
+  const northZ = centerZ + half + t / 2;
+  addSegment(centerX, northZ, wallXSpan, t);
 
-  const southZ = -half - t / 2;
-  const southWestOuter = -half - t;
-  const southEastOuter = half + t;
+  const southZ = centerZ - half - t / 2;
+  const southWestOuter = centerX - half - t;
+  const southEastOuter = centerX + half + t;
   const gateHalf = CASTLE_GATE_HALF_WIDTH;
-  const southLeftW = -gateHalf - southWestOuter;
-  const southRightW = southEastOuter - gateHalf;
-  const southLeftCx = (southWestOuter + -gateHalf) / 2;
-  const southRightCx = (gateHalf + southEastOuter) / 2;
+  const southLeftW = centerX + -gateHalf - southWestOuter;
+  const southRightW = southEastOuter - (centerX + gateHalf);
+  const southLeftCx = (southWestOuter + (centerX + -gateHalf)) / 2;
+  const southRightCx = (centerX + gateHalf + southEastOuter) / 2;
   addSegment(southLeftCx, southZ, southLeftW, t);
   addSegment(southRightCx, southZ, southRightW, t);
 }

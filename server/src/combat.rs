@@ -2,7 +2,8 @@
 
 use uuid::Uuid;
 
-use crate::world::{EYE_HEIGHT, PLAYER_RADIUS};
+use crate::items::{equipment_armor_multiplier, ArmorSlots};
+use crate::world::{EYE_HEIGHT, PLAYER_RADIUS, SPAWN_SAFE_ZONES};
 
 pub const MAX_HP: f64 = 100.0;
 pub const MAX_STAMINA: f64 = 100.0;
@@ -41,20 +42,11 @@ impl Default for WeaponKind {
     }
 }
 
-impl WeaponKind {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "sword" => Some(WeaponKind::Sword),
-            "shield" => Some(WeaponKind::Shield),
-            "bow" => Some(WeaponKind::Bow),
-            _ => None,
-        }
-    }
-}
-
 #[inline]
 pub fn point_in_spawn_safe_zone(x: f64, z: f64) -> bool {
-    x >= -5.0 && x <= 5.0 && z >= -5.0 && z <= 5.0
+    SPAWN_SAFE_ZONES.iter().any(|&(min_x, max_x, min_z, max_z)| {
+        x >= min_x && x <= max_x && z >= min_z && z <= max_z
+    })
 }
 
 /// Matches `forwardFromCameraYaw` in `src/combat/constants.ts`.
@@ -117,10 +109,10 @@ pub fn frontal_dot(defender_yaw: f64, from_attacker_x: f64, from_attacker_z: f64
 pub fn damage_after_shield_melee(
     base: f64,
     blocking: bool,
-    weapon: WeaponKind,
+    has_shield: bool,
     frontal_dot: f64,
 ) -> f64 {
-    if !blocking || weapon != WeaponKind::Shield {
+    if !blocking || !has_shield {
         return base;
     }
     if frontal_dot < 0.35 {
@@ -133,16 +125,20 @@ pub fn damage_after_shield_ranged(
     base: f64,
     heavy: bool,
     blocking: bool,
-    weapon: WeaponKind,
+    has_shield: bool,
     frontal_dot: f64,
 ) -> f64 {
-    if blocking && weapon == WeaponKind::Shield && frontal_dot >= 0.35 {
+    if blocking && has_shield && frontal_dot >= 0.35 {
         if heavy {
             return 0.0;
         }
         return base * 0.3;
     }
     base
+}
+
+pub fn damage_after_armor(base: f64, armor: ArmorSlots) -> f64 {
+    base * equipment_armor_multiplier(armor)
 }
 
 pub struct Arrow {
@@ -229,6 +225,7 @@ pub fn spawn_arrow_from_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::items::{ArmorPieceKind, ArmorSlots};
 
     #[test]
     fn forward_matches_ts_yaw_zero() {
@@ -253,5 +250,23 @@ mod tests {
     fn melee_wide_lateral_misses() {
         let eye = 2.0;
         assert!(!melee_hit_valid(0.0, 0.0, 0.0, eye, 0.55, -1.0, eye));
+    }
+
+    #[test]
+    fn shield_melee_reduces_frontal_damage() {
+        let damage = damage_after_shield_melee(25.0, true, true, 0.9);
+        assert!((damage - 7.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn armor_multiplier_stacks_across_pieces() {
+        let armor = ArmorSlots {
+            head: Some(ArmorPieceKind::ScoutHelm),
+            chest: Some(ArmorPieceKind::ScoutChest),
+            legs: Some(ArmorPieceKind::ScoutLegs),
+        };
+        let damage = damage_after_armor(100.0, armor);
+        assert!(damage < 70.0);
+        assert!(damage > 60.0);
     }
 }

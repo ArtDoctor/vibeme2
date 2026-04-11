@@ -30,7 +30,8 @@ export class MultiplayerClient {
     creative: boolean;
     flying: boolean;
     sprinting: boolean;
-    weapon: string;
+    mainHand: string;
+    offHand: string | null;
     blocking: boolean;
     bowCharge: number;
     swing: boolean;
@@ -149,7 +150,8 @@ export class MultiplayerClient {
     creative: boolean;
     flying: boolean;
     sprinting: boolean;
-    weapon: string;
+    mainHand: string;
+    offHand: string | null;
     blocking: boolean;
     bowCharge: number;
     swing: boolean;
@@ -172,7 +174,8 @@ export class MultiplayerClient {
         creative: p.creative,
         flying: p.flying,
         sprinting: p.sprinting,
-        weapon: p.weapon,
+        mainHand: p.mainHand,
+        offHand: p.offHand ?? "",
         blocking: p.blocking,
         bowCharge: p.bowCharge,
         swing: p.swing,

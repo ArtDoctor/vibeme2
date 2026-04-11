@@ -1,8 +1,7 @@
 import { Clock, Group, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { horizontalYawFromCamera } from "../combat/constants";
 import type { MultiplayerClient } from "../net/multiplayer";
-import type { SnapshotMob, SnapshotMsg, SnapshotPlayer } from "../net/types";
-import { normalizeWeaponKind } from "../net/snapshotNormalize";
+import type { InventoryEntry, SnapshotMob, SnapshotMsg, SnapshotPlayer } from "../net/types";
 import { CombatInput } from "../player/CombatInput";
 import { FirstPersonControls } from "../player/FirstPersonControls";
 import { buildDesertScene } from "../scene/DesertScene";
@@ -16,6 +15,7 @@ import {
 import { WorldArrows } from "./WorldArrows";
 import { WorldMobs } from "./WorldMobs";
 import { CompassHud } from "./CompassHud";
+import { WorldPickups } from "./WorldPickups";
 
 /**
  * Owns the renderer, scene, camera, animation loop, resize handler, and dispose.
@@ -29,6 +29,7 @@ export interface GameOptions {
   canvas: HTMLCanvasElement;
   hudHint?: HTMLElement;
   safeZoneHint?: HTMLElement;
+  creativeHint?: HTMLElement;
   /** HP / stamina / gold (multiplayer). */
   hudCombat?: HTMLElement;
   /** When set, other players are rendered for this connection. */
@@ -50,6 +51,7 @@ export class Game {
   private readonly resizeHandler: () => void;
   private readonly remotePlayers: RemotePlayers | null;
   private readonly worldArrows: WorldArrows | null;
+  private readonly worldPickups: WorldPickups | null;
   private readonly worldMobs: WorldMobs | null;
   private readonly compassHud: CompassHud | null;
   private readonly localThirdPersonRig: Group | null;
@@ -90,6 +92,7 @@ export class Game {
       world,
       hudHint: options.hudHint,
       safeZoneHint: options.safeZoneHint,
+      creativeHint: options.creativeHint,
     });
     this.controls.setSpawn(world.spawn);
 
@@ -101,6 +104,8 @@ export class Game {
         : null;
     this.worldArrows =
       options.localPlayerId !== undefined ? new WorldArrows(this.scene) : null;
+    this.worldPickups =
+      options.localPlayerId !== undefined ? new WorldPickups(this.scene) : null;
     this.worldMobs =
       options.localPlayerId !== undefined
         ? new WorldMobs(this.scene, this.camera, options.localPlayerId)
@@ -156,7 +161,8 @@ export class Game {
           creative: pose.creative,
           flying: pose.flying,
           sprinting: pose.sprinting,
-          weapon: normalizeWeaponKind("sword"),
+          mainHand: "woodenSword" as const,
+          offHand: null,
           blocking: false,
           bowCharge: 0,
           swing: false,
@@ -178,7 +184,8 @@ export class Game {
         creative: pose.creative,
         flying: pose.flying,
         sprinting: pose.sprinting,
-        weapon: normalizeWeaponKind(c.weapon),
+        mainHand: c.mainHand,
+        offHand: c.offHand,
         blocking: c.blocking,
         bowCharge: c.bowCharge,
         swing: c.swing,
@@ -197,8 +204,12 @@ export class Game {
       id !== undefined
         ? (players.find((p) => p.id === id) ?? null)
         : null;
+    if (this.localPlayerSnapshot) {
+      this.combatInput?.syncFromSnapshot(this.localPlayerSnapshot);
+    }
     this.remotePlayers?.applySnapshot(players);
     this.worldArrows?.sync(arrows);
+    this.worldPickups?.sync(msg.pickups ?? []);
     this.worldMobs?.sync(mobs, msg.damageFloats);
     this.lastMobs = mobs;
     this.updateCombatHud(players);
@@ -214,17 +225,54 @@ export class Game {
     const hpEl = el.querySelector("[data-hp]");
     const stEl = el.querySelector("[data-stamina]");
     const gEl = el.querySelector("[data-gold]");
-    const wEl = el.querySelector("[data-weapon]");
+    const mainHandEl = el.querySelector("[data-main-hand]");
+    const offHandEl = el.querySelector("[data-off-hand]");
+    const armorEl = el.querySelector("[data-armor]");
+    const packSwordEl = el.querySelector("[data-pack-woodenSword]");
+    const packShieldEl = el.querySelector("[data-pack-basicShield]");
+    const packBowEl = el.querySelector("[data-pack-shortBow]");
+    const packArmorEl = el.querySelector("[data-pack-armor]");
     if (hpEl) hpEl.textContent = String(Math.round(me.hp));
     if (stEl) stEl.textContent = String(Math.round(me.stamina));
     if (gEl) gEl.textContent = String(me.gold);
-    const weaponLabel =
-      this.combatInput != null ? this.combatInput.weapon : me.weapon;
-    if (wEl) wEl.textContent = weaponLabel;
+    const mainHand =
+      this.combatInput != null ? this.combatInput.getCurrentMainHand() : me.mainHand;
+    const offHand =
+      this.combatInput != null ? this.combatInput.getCurrentOffHand() : me.offHand;
+    if (mainHandEl) {
+      mainHandEl.textContent = mainHand === "shortBow" ? "short bow" : "wooden sword";
+    }
+    if (offHandEl) {
+      offHandEl.textContent = offHand === "basicShield" ? "basic shield" : "none";
+    }
+    if (armorEl) {
+      armorEl.textContent =
+        me.armor.head && me.armor.chest && me.armor.legs ? "scout set" : "none";
+    }
     for (const node of el.querySelectorAll("[data-weapon-slot]")) {
       if (!(node instanceof HTMLElement)) continue;
       const slot = node.dataset.weaponSlot;
-      node.classList.toggle("weapon-slot--active", slot === weaponLabel);
+      const active =
+        (slot === "woodenSword" && mainHand === "woodenSword") ||
+        (slot === "shortBow" && mainHand === "shortBow") ||
+        (slot === "basicShield" && offHand === "basicShield");
+      node.classList.toggle("weapon-slot--active", active);
+      node.classList.toggle("weapon-slot--owned", inventoryCount(me.inventory, slot) > 0);
+      node.classList.toggle("weapon-slot--locked", inventoryCount(me.inventory, slot) === 0);
+    }
+    if (packSwordEl) packSwordEl.textContent = String(inventoryCount(me.inventory, "woodenSword"));
+    if (packShieldEl) {
+      packShieldEl.textContent = String(inventoryCount(me.inventory, "basicShield"));
+    }
+    if (packBowEl) packBowEl.textContent = String(inventoryCount(me.inventory, "shortBow"));
+    if (packArmorEl) {
+      packArmorEl.textContent = String(
+        Math.min(
+          inventoryCount(me.inventory, "scoutHelm"),
+          inventoryCount(me.inventory, "scoutChest"),
+          inventoryCount(me.inventory, "scoutLegs"),
+        ),
+      );
     }
     const hpFill = el.querySelector("[data-hp-fill]") as HTMLElement | null;
     const stFill = el.querySelector("[data-stamina-fill]") as HTMLElement | null;
@@ -242,6 +290,7 @@ export class Game {
       this.controls.update(delta);
       this.combatInput?.update(delta);
       this.remotePlayers?.update();
+      this.worldPickups?.update(delta);
       this.worldMobs?.update(delta);
       const eye = this.controls.getNetworkPose();
       this.compassHud?.update(
@@ -273,7 +322,8 @@ export class Game {
           z: pose.z,
           yaw: pose.yaw,
           pitch: pose.pitch,
-          weapon: c.weapon,
+          mainHand: c.getCurrentMainHand(),
+          offHand: c.getCurrentOffHand(),
           blocking: c.getBlocking(),
           bowCharge: c.getBowChargeVisual(),
         });
@@ -302,6 +352,7 @@ export class Game {
     this.multiplayer = null;
     this.remotePlayers?.dispose();
     this.worldArrows?.dispose();
+    this.worldPickups?.dispose();
     this.worldMobs?.dispose();
     this.compassHud?.dispose();
     if (this.localThirdPersonRig) {
@@ -322,4 +373,12 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
   }
+}
+
+function inventoryCount(
+  inventory: readonly InventoryEntry[],
+  kind: string | undefined,
+): number {
+  if (!kind) return 0;
+  return inventory.find((entry) => entry.kind === kind)?.count ?? 0;
 }

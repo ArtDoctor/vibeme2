@@ -1,5 +1,6 @@
 mod combat;
 mod interest;
+mod items;
 mod mobs;
 mod protocol;
 mod sim;
@@ -175,7 +176,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             creative,
                             flying,
                             sprinting,
-                            weapon,
+                            main_hand,
+                            off_hand,
                             blocking,
                             bow_charge,
                             swing,
@@ -194,7 +196,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 creative,
                                 flying,
                                 sprinting,
-                                weapon,
+                                main_hand,
+                                off_hand,
                                 blocking,
                                 bow_charge,
                                 swing,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeMainHandKind,
   normalizeSnapshotMsg,
   normalizeSnapshotPlayer,
   normalizeWeaponKind,
@@ -10,6 +11,13 @@ describe("normalizeWeaponKind", () => {
     expect(normalizeWeaponKind(undefined)).toBe("sword");
     expect(normalizeWeaponKind("axe")).toBe("sword");
     expect(normalizeWeaponKind(null)).toBe("sword");
+  });
+});
+
+describe("normalizeMainHandKind", () => {
+  it("defaults unknown to wooden sword", () => {
+    expect(normalizeMainHandKind(undefined)).toBe("woodenSword");
+    expect(normalizeMainHandKind("axe")).toBe("woodenSword");
   });
 });
 
@@ -25,6 +33,10 @@ describe("normalizeSnapshotPlayer", () => {
       pitch: 0,
     });
     expect(p.weapon).toBe("sword");
+    expect(p.mainHand).toBe("woodenSword");
+    expect(p.offHand).toBeNull();
+    expect(p.inventory).toEqual([{ kind: "woodenSword", count: 1 }]);
+    expect(p.armor).toEqual({ head: null, chest: null, legs: null });
     expect(p.bowCharge).toBe(0);
     expect(p.swingT).toBe(0);
     expect(p.blocking).toBe(false);
@@ -50,5 +62,16 @@ describe("normalizeSnapshotMsg", () => {
       mobs: [],
     });
     expect(m.deaths).toEqual(["abc", "42"]);
+  });
+
+  it("normalizes pickup snapshots when present", () => {
+    const m = normalizeSnapshotMsg({
+      type: "snapshot",
+      tick: 2,
+      players: [],
+      pickups: [{ id: "4", kind: "armor", x: 1, y: 2, z: 3 }],
+      mobs: [],
+    });
+    expect(m.pickups).toEqual([{ id: 4, kind: "armor", x: 1, y: 2, z: 3 }]);
   });
 });

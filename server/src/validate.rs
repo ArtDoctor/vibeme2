@@ -2,7 +2,10 @@
 
 use crate::world::{resolve_colliders, snap_to_ground, AabbCollider};
 
-const MOVE_SPEED: f64 = 7.5;
+/// Half of legacy 7.5 m/s — default running is slower.
+const MOVE_SPEED: f64 = 3.75;
+/// 3× legacy default — creative locomotion cap.
+const CREATIVE_MOVE_SPEED: f64 = 22.5;
 const SPEED_BOOST_MULTIPLIER: f64 = 3.0;
 const MAX_VERTICAL_SPEED: f64 = 28.0;
 
@@ -25,6 +28,11 @@ pub fn clamp_claimed_position(
     } else {
         1.0
     };
+    let move_cap = if creative {
+        CREATIVE_MOVE_SPEED
+    } else {
+        MOVE_SPEED
+    };
 
     let mut x = claimed.0;
     let mut y = claimed.1;
@@ -33,7 +41,7 @@ pub fn clamp_claimed_position(
     let dx = x - prev.0;
     let dz = z - prev.2;
     let horiz = (dx * dx + dz * dz).sqrt();
-    let max_h = MOVE_SPEED * speed_multiplier * dt * 1.55;
+    let max_h = move_cap * speed_multiplier * dt * 1.55;
     if horiz > max_h && horiz > 1e-9 {
         let s = max_h / horiz;
         x = prev.0 + dx * s;
@@ -42,7 +50,7 @@ pub fn clamp_claimed_position(
 
     let dy = y - prev.1;
     let max_v = if flying {
-        MOVE_SPEED * speed_multiplier * dt * 1.55
+        move_cap * speed_multiplier * dt * 1.55
     } else {
         MAX_VERTICAL_SPEED * dt
     };

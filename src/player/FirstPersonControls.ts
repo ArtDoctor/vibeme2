@@ -9,6 +9,8 @@ import { iterativelyResolvePlayerXz } from "./circleAabbXZ";
 import {
   applyCreativeSpacePress,
   createMovementModeState,
+  CREATIVE_MOVE_SPEED,
+  DEFAULT_MOVE_SPEED,
   movementSpeedMultiplier,
 } from "./movementMode";
 
@@ -30,7 +32,6 @@ export { EYE_HEIGHT };
  *     once multiplayer lands (docs/TASKS.md).
  */
 
-const MOVE_SPEED = 7.5;
 const JUMP_SPEED = 6.0;
 const GRAVITY = 24;
 /** Vertical tolerance for "I am on the ground". */
@@ -52,6 +53,8 @@ export interface FirstPersonControlsOptions {
   hudHint?: HTMLElement;
   /** Shown while the player is inside the spawn castle safe zone (UI only). */
   safeZoneHint?: HTMLElement;
+  /** Shown while creative mode is enabled (UI only). */
+  creativeHint?: HTMLElement;
 }
 
 export class FirstPersonControls {
@@ -66,6 +69,7 @@ export class FirstPersonControls {
   private readonly world: DesertWorld;
   private readonly hudHint?: HTMLElement;
   private readonly safeZoneHint?: HTMLElement;
+  private readonly creativeHint?: HTMLElement;
   private readonly move = new Vector3();
   private readonly velocity = new Vector3();
   /** Eye / capsule top — authoritative for physics and networking (not camera when in third person). */
@@ -91,6 +95,7 @@ export class FirstPersonControls {
     this.world = options.world;
     this.hudHint = options.hudHint;
     this.safeZoneHint = options.safeZoneHint;
+    this.creativeHint = options.creativeHint;
 
     this.controls = new PointerLockControls(this.camera, this.domElement);
 
@@ -128,6 +133,7 @@ export class FirstPersonControls {
       }
       this.applyCameraView();
       this.updateSafeZoneHint();
+      this.updateCreativeHint();
       return;
     }
 
@@ -135,13 +141,15 @@ export class FirstPersonControls {
       this.updateFlyMode(delta);
       this.applyCameraView();
       this.updateSafeZoneHint();
+      this.updateCreativeHint();
       return;
     }
 
     this.buildHorizontalMoveFromKeys();
     const speedMultiplier = movementSpeedMultiplier(this.keySprint);
-    this.velocity.x = this.move.x * MOVE_SPEED * speedMultiplier;
-    this.velocity.z = this.move.z * MOVE_SPEED * speedMultiplier;
+    const base = this.effectiveHorizontalMoveSpeed();
+    this.velocity.x = this.move.x * base * speedMultiplier;
+    this.velocity.z = this.move.z * base * speedMultiplier;
     this.velocity.y -= GRAVITY * delta;
 
     // ---- Integrate XZ, then resolve obstacle penetration ----
@@ -189,6 +197,7 @@ export class FirstPersonControls {
 
     this.applyCameraView();
     this.updateSafeZoneHint();
+    this.updateCreativeHint();
   }
 
   /** Eye position + view angles for multiplayer sync (radians, YXZ order). */
@@ -253,6 +262,16 @@ export class FirstPersonControls {
     this.safeZoneHint.classList.toggle("hidden", !inside);
   }
 
+  private updateCreativeHint(): void {
+    if (!this.creativeHint) return;
+    this.creativeHint.classList.toggle("hidden", !this.movementMode.creativeMode);
+  }
+
+  /** Walk/run base speed before sprint multiplier. */
+  private effectiveHorizontalMoveSpeed(): number {
+    return this.movementMode.creativeMode ? CREATIVE_MOVE_SPEED : DEFAULT_MOVE_SPEED;
+  }
+
   private buildHorizontalMoveFromKeys(): void {
     this.move.set(0, 0, 0);
     if (this.keyForward) this.move.z -= 1;
@@ -272,7 +291,8 @@ export class FirstPersonControls {
 
   private updateFlyMode(delta: number): void {
     this.buildHorizontalMoveFromKeys();
-    const speed = MOVE_SPEED * movementSpeedMultiplier(this.keySprint);
+    const speed =
+      CREATIVE_MOVE_SPEED * movementSpeedMultiplier(this.keySprint);
     this.velocity.x = this.move.x * speed;
     this.velocity.z = this.move.z * speed;
     this.velocity.y = 0;

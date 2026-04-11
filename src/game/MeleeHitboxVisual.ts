@@ -17,7 +17,6 @@ import {
   MELEE_BOX_HALF_WIDTH,
 } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
-import { normalizeWeaponKind } from "../net/snapshotNormalize";
 import type { SnapshotPlayer } from "../net/types";
 import type { CombatInput } from "../player/CombatInput";
 
@@ -62,9 +61,9 @@ export class MeleeHitboxVisual {
     me: SnapshotPlayer | null,
     combat: CombatInput | null,
   ): void {
-    const weapon = normalizeWeaponKind(combat?.weapon ?? me?.weapon ?? "sword");
+    const mainHand = combat?.getCurrentMainHand() ?? me?.mainHand ?? "woodenSword";
     const swingT = me?.swingT ?? 0;
-    const show = weapon === "sword" && swingT > 0.001;
+    const show = mainHand === "woodenSword" && swingT > 0.001;
     this.root.visible = show;
     if (!show) return;
 

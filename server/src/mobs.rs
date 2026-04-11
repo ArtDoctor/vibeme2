@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone};
 use crate::world::{
     hash2, resolve_colliders_entity, sample_terrain_height, snap_to_ground_with_eye, AabbCollider,
-    TERRAIN_HALF_SIZE,
+    SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
 };
 
 pub const MOB_RADIUS: f64 = 0.28;
@@ -22,12 +22,6 @@ pub const MOB_HIT_COOLDOWN_S: f64 = 0.85;
 // still encounter enemies within the per-view snapshot radius.
 pub const MAX_MOBS: usize = 160;
 pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.5;
-
-/// Matches `SPAWN_SAFE_ZONE_AABB` in `src/world/spawnSafeZone.ts`.
-const SAFE_MIN_X: f64 = -5.0;
-const SAFE_MAX_X: f64 = 5.0;
-const SAFE_MIN_Z: f64 = -5.0;
-const SAFE_MAX_Z: f64 = 5.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MobKind {
@@ -84,10 +78,16 @@ pub fn mob_arrow_hit(ax: f64, ay: f64, az: f64, m: &Mob) -> bool {
     arrow_hits_vertical_cylinder(ax, ay, az, m.x, m.y, m.z, MOB_RADIUS)
 }
 
-/// Push mob so its XZ circle does not overlap the spawn safe AABB.
-pub fn extrude_mob_from_spawn_safe_zone(x: &mut f64, z: &mut f64) {
-    let px = x.clamp(SAFE_MIN_X, SAFE_MAX_X);
-    let pz = z.clamp(SAFE_MIN_Z, SAFE_MAX_Z);
+fn extrude_mob_from_aabb(
+    x: &mut f64,
+    z: &mut f64,
+    min_x: f64,
+    max_x: f64,
+    min_z: f64,
+    max_z: f64,
+) {
+    let px = x.clamp(min_x, max_x);
+    let pz = z.clamp(min_z, max_z);
     let dx = *x - px;
     let dz = *z - pz;
     let dist = (dx * dx + dz * dz).sqrt();
@@ -95,19 +95,19 @@ pub fn extrude_mob_from_spawn_safe_zone(x: &mut f64, z: &mut f64) {
         return;
     }
     if dist < 1e-9 {
-        let d_left = *x - SAFE_MIN_X;
-        let d_right = SAFE_MAX_X - *x;
-        let d_bottom = *z - SAFE_MIN_Z;
-        let d_top = SAFE_MAX_Z - *z;
+        let d_left = *x - min_x;
+        let d_right = max_x - *x;
+        let d_bottom = *z - min_z;
+        let d_top = max_z - *z;
         let m = d_left.min(d_right).min(d_bottom).min(d_top);
         if m == d_left {
-            *x = SAFE_MIN_X - MOB_RADIUS;
+            *x = min_x - MOB_RADIUS;
         } else if m == d_right {
-            *x = SAFE_MAX_X + MOB_RADIUS;
+            *x = max_x + MOB_RADIUS;
         } else if m == d_bottom {
-            *z = SAFE_MIN_Z - MOB_RADIUS;
+            *z = min_z - MOB_RADIUS;
         } else {
-            *z = SAFE_MAX_Z + MOB_RADIUS;
+            *z = max_z + MOB_RADIUS;
         }
         return;
     }
@@ -116,13 +116,40 @@ pub fn extrude_mob_from_spawn_safe_zone(x: &mut f64, z: &mut f64) {
     *z += dz * push;
 }
 
+/// Push mob so its XZ circle does not overlap any spawn safe AABB.
+pub fn extrude_mob_from_spawn_safe_zone(x: &mut f64, z: &mut f64) {
+    for _ in 0..16 {
+        let mut any = false;
+        for &(min_x, max_x, min_z, max_z) in SPAWN_SAFE_ZONES.iter() {
+            let before = (*x, *z);
+            extrude_mob_from_aabb(x, z, min_x, max_x, min_z, max_z);
+            if (*x - before.0).abs() > 1e-12 || (*z - before.1).abs() > 1e-12 {
+                any = true;
+            }
+        }
+        if !any {
+            break;
+        }
+    }
+}
+
+#[inline]
+fn circle_overlaps_any_safe_zone(x: f64, z: f64) -> bool {
+    for &(min_x, max_x, min_z, max_z) in SPAWN_SAFE_ZONES.iter() {
+        let px = x.clamp(min_x, max_x);
+        let pz = z.clamp(min_z, max_z);
+        let dx = x - px;
+        let dz = z - pz;
+        if dx * dx + dz * dz < MOB_RADIUS * MOB_RADIUS - 1e-6 {
+            return true;
+        }
+    }
+    false
+}
+
 #[inline]
 fn spawn_position_valid(x: f64, z: f64) -> bool {
-    let px = x.clamp(SAFE_MIN_X, SAFE_MAX_X);
-    let pz = z.clamp(SAFE_MIN_Z, SAFE_MAX_Z);
-    let dx = x - px;
-    let dz = z - pz;
-    dx * dx + dz * dz >= MOB_RADIUS * MOB_RADIUS - 1e-6
+    !circle_overlaps_any_safe_zone(x, z)
 }
 
 fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option<Mob> {

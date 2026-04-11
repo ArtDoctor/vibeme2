@@ -1,7 +1,15 @@
 import { MOB_HP, TRAINING_DUMMY_HP } from "../combat/constants";
 import type {
+  ArmorPieceKind,
+  ArmorSlots,
   DamageFloatEvent,
+  InventoryEntry,
+  InventoryItemKind,
+  MainHandKind,
   MobKind,
+  OffHandKind,
+  PickupKind,
+  SnapshotPickup,
   SnapshotArrow,
   SnapshotMob,
   SnapshotMsg,
@@ -10,6 +18,7 @@ import type {
 } from "./types";
 
 export const DEFAULT_WEAPON: WeaponKind = "sword";
+export const DEFAULT_MAIN_HAND: MainHandKind = "woodenSword";
 
 function num(v: unknown, fallback: number): number {
   if (typeof v === "number" && Number.isFinite(v)) {
@@ -45,6 +54,67 @@ export function normalizeWeaponKind(raw: unknown): WeaponKind {
   return DEFAULT_WEAPON;
 }
 
+export function normalizeMainHandKind(raw: unknown): MainHandKind {
+  if (raw === "shortBow") {
+    return "shortBow";
+  }
+  return DEFAULT_MAIN_HAND;
+}
+
+export function normalizeOffHandKind(raw: unknown): OffHandKind | null {
+  return raw === "basicShield" ? "basicShield" : null;
+}
+
+function normalizeArmorPieceKind(raw: unknown): ArmorPieceKind | null {
+  if (raw === "scoutHelm" || raw === "scoutChest" || raw === "scoutLegs") {
+    return raw;
+  }
+  return null;
+}
+
+function normalizeInventoryItemKind(raw: unknown): InventoryItemKind {
+  switch (raw) {
+    case "basicShield":
+    case "shortBow":
+    case "scoutHelm":
+    case "scoutChest":
+    case "scoutLegs":
+      return raw;
+    default:
+      return "woodenSword";
+  }
+}
+
+function normalizeArmorSlots(raw: unknown): ArmorSlots {
+  const o =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    head: normalizeArmorPieceKind(o.head),
+    chest: normalizeArmorPieceKind(o.chest),
+    legs: normalizeArmorPieceKind(o.legs),
+  };
+}
+
+function normalizeInventoryEntry(raw: unknown): InventoryEntry {
+  const o =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    kind: normalizeInventoryItemKind(o.kind),
+    count: Math.max(0, Math.floor(num(o.count, 0))),
+  };
+}
+
+function normalizePickupKind(raw: unknown): PickupKind {
+  if (raw === "bow" || raw === "armor") {
+    return raw;
+  }
+  return "shield";
+}
+
 /**
  * Coerce WebSocket JSON into a complete `SnapshotPlayer` so older servers,
  * partial payloads, or bad values cannot leave `undefined` (which breaks HUD
@@ -55,6 +125,7 @@ export function normalizeSnapshotPlayer(raw: unknown): SnapshotPlayer {
     raw !== null && typeof raw === "object"
       ? (raw as Record<string, unknown>)
       : {};
+  const mainHand = normalizeMainHandKind(o.mainHand);
 
   return {
     id: str(o.id, ""),
@@ -67,7 +138,13 @@ export function normalizeSnapshotPlayer(raw: unknown): SnapshotPlayer {
     hp: num(o.hp, 100),
     stamina: num(o.stamina, 100),
     gold: Math.max(0, Math.floor(num(o.gold, 0))),
-    weapon: normalizeWeaponKind(o.weapon),
+    mainHand,
+    offHand: normalizeOffHandKind(o.offHand),
+    armor: normalizeArmorSlots(o.armor),
+    inventory: Array.isArray(o.inventory)
+      ? o.inventory.map(normalizeInventoryEntry).filter((entry) => entry.count > 0)
+      : [{ kind: "woodenSword", count: 1 }],
+    weapon: normalizeWeaponKind(o.weapon ?? (mainHand === "shortBow" ? "bow" : "sword")),
     blocking: bool(o.blocking, false),
     bowCharge: Math.min(1, Math.max(0, num(o.bowCharge, 0))),
     swingT: Math.min(1, Math.max(0, num(o.swingT, 0))),
@@ -127,6 +204,20 @@ export function normalizeSnapshotArrow(raw: unknown): SnapshotArrow {
   };
 }
 
+export function normalizeSnapshotPickup(raw: unknown): SnapshotPickup {
+  const o =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    id: Math.max(0, Math.floor(num(o.id, 0))),
+    kind: normalizePickupKind(o.kind),
+    x: num(o.x, 0),
+    y: num(o.y, 0),
+    z: num(o.z, 0),
+  };
+}
+
 export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
   const o =
     raw !== null && typeof raw === "object"
@@ -143,6 +234,11 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
   const arrowsIn = o.arrows;
   const arrows: SnapshotArrow[] | undefined = Array.isArray(arrowsIn)
     ? arrowsIn.map(normalizeSnapshotArrow)
+    : undefined;
+
+  const pickupsIn = o.pickups;
+  const pickups: SnapshotPickup[] | undefined = Array.isArray(pickupsIn)
+    ? pickupsIn.map(normalizeSnapshotPickup)
     : undefined;
 
   const mobsIn = o.mobs;
@@ -165,6 +261,7 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
     tick,
     players,
     ...(arrows !== undefined && arrows.length > 0 ? { arrows } : {}),
+    ...(pickups !== undefined && pickups.length > 0 ? { pickups } : {}),
     mobs,
     ...(damageFloats !== undefined && damageFloats.length > 0
       ? { damageFloats }

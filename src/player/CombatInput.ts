@@ -1,8 +1,14 @@
 import { BOW_MIN_CHARGE } from "../combat/constants";
-import type { WeaponKind } from "../net/types";
+import type {
+  InventoryEntry,
+  MainHandKind,
+  OffHandKind,
+  SnapshotPlayer,
+} from "../net/types";
 
 export interface CombatOutbound {
-  weapon: WeaponKind;
+  mainHand: MainHandKind;
+  offHand: OffHandKind | null;
   blocking: boolean;
   bowCharge: number;
   swing: boolean;
@@ -13,11 +19,12 @@ const SWING_COOLDOWN_S = 0.45;
 
 /**
  * Keyboard + mouse combat for Milestone 2.
- * 1–3 / numpad 1–3 — weapon (works before pointer lock). Sword: LMB swing. Shield: RMB block.
- * Bow: hold LMB to charge, release to fire (mouse needs pointer lock).
+ * 1 — sword, 2 — toggle shield off-hand, 3 — bow (works before pointer lock).
+ * Sword: LMB swing. Shield: RMB block while sword is equipped. Bow: hold/release LMB.
  */
 export class CombatInput {
-  weapon: WeaponKind = "sword";
+  mainHand: MainHandKind = "woodenSword";
+  offHand: OffHandKind | null = null;
   private blocking = false;
   private bowCharging = false;
   private bowCharge = 0;
@@ -26,6 +33,8 @@ export class CombatInput {
   private lastSwingSent = 0;
   private swingPending = false;
   private firePending = false;
+  private ownedShield = false;
+  private ownedBow = false;
 
   constructor(
     private readonly domElement: HTMLElement,
@@ -48,9 +57,9 @@ export class CombatInput {
       return;
     }
 
-    if (this.weapon === "bow" && this.bowCharging) {
+    if (this.mainHand === "shortBow" && this.bowCharging) {
       this.bowCharge = Math.min(1, this.bowCharge + dt / 1.15);
-    } else if (this.weapon !== "bow") {
+    } else if (this.mainHand !== "shortBow") {
       this.bowCharge = 0;
     }
   }
@@ -66,7 +75,8 @@ export class CombatInput {
       this.bowCharge = 0;
     }
     return {
-      weapon: this.weapon,
+      mainHand: this.mainHand,
+      offHand: this.offHand,
       blocking: this.blocking,
       bowCharge,
       swing,
@@ -79,9 +89,43 @@ export class CombatInput {
     return this.blocking;
   }
 
+  getCurrentMainHand(): MainHandKind {
+    return this.mainHand;
+  }
+
+  getCurrentOffHand(): OffHandKind | null {
+    return this.offHand;
+  }
+
   /** Current bow draw amount 0–1 for local view animation. */
   getBowChargeVisual(): number {
     return this.bowCharge;
+  }
+
+  syncFromSnapshot(player: SnapshotPlayer): void {
+    this.ownedShield = hasInventoryItem(player.inventory, "basicShield");
+    this.ownedBow = hasInventoryItem(player.inventory, "shortBow");
+    if (!this.ownedShield) {
+      this.offHand = null;
+      this.blocking = false;
+    }
+    if (!this.ownedBow && this.mainHand === "shortBow") {
+      this.mainHand = "woodenSword";
+      this.bowCharging = false;
+      this.bowCharge = 0;
+    }
+    if (this.offHand === null && player.offHand !== null) {
+      this.offHand = player.offHand;
+    }
+    if (!hasInventoryItem(player.inventory, "woodenSword")) {
+      this.mainHand = player.mainHand;
+    }
+    if (player.mainHand !== this.mainHand && !this.isPointerLocked()) {
+      this.mainHand = player.mainHand;
+    }
+    if (player.offHand !== this.offHand && !this.isPointerLocked()) {
+      this.offHand = player.offHand;
+    }
   }
 
   dispose(): void {
@@ -93,24 +137,24 @@ export class CombatInput {
   private readonly onMouseDown = (e: MouseEvent): void => {
     if (!this.isPointerLocked()) return;
     if (e.button === 0) {
-      if (this.weapon === "sword") {
+      if (this.mainHand === "woodenSword") {
         const now = performance.now() / 1000;
         if (now - this.lastSwingSent >= SWING_COOLDOWN_S) {
           this.swingPending = true;
           this.lastSwingSent = now;
         }
-      } else if (this.weapon === "bow") {
+      } else if (this.mainHand === "shortBow") {
         this.bowCharging = true;
         this.bowCharge = 0;
       }
-    } else if (e.button === 2 && this.weapon === "shield") {
+    } else if (e.button === 2 && this.canBlock()) {
       e.preventDefault();
       this.blocking = true;
     }
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
-    if (e.button === 0 && this.weapon === "bow" && this.bowCharging) {
+    if (e.button === 0 && this.mainHand === "shortBow" && this.bowCharging) {
       this.bowCharging = false;
       if (this.bowCharge >= BOW_MIN_CHARGE) {
         this.bowShotCharge = this.bowCharge;
@@ -136,24 +180,42 @@ export class CombatInput {
     switch (code) {
       case "Digit1":
       case "Numpad1":
-        this.weapon = "sword";
+        this.mainHand = "woodenSword";
         this.bowCharging = false;
         this.bowCharge = 0;
         this.blocking = false;
         return true;
       case "Digit2":
       case "Numpad2":
-        this.weapon = "shield";
-        this.bowCharging = false;
-        this.bowCharge = 0;
+        if (!this.ownedShield) {
+          return false;
+        }
+        this.offHand = this.offHand === "basicShield" ? null : "basicShield";
+        if (!this.canBlock()) {
+          this.blocking = false;
+        }
         return true;
       case "Digit3":
       case "Numpad3":
-        this.weapon = "bow";
+        if (!this.ownedBow) {
+          return false;
+        }
+        this.mainHand = "shortBow";
         this.blocking = false;
         return true;
       default:
         return false;
     }
   }
+
+  private canBlock(): boolean {
+    return this.mainHand === "woodenSword" && this.offHand === "basicShield";
+  }
+}
+
+function hasInventoryItem(
+  inventory: readonly InventoryEntry[],
+  kind: InventoryEntry["kind"],
+): boolean {
+  return inventory.some((entry) => entry.kind === kind && entry.count > 0);
 }

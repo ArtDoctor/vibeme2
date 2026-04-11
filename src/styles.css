@@ -23,12 +23,14 @@ body {
 }
 
 .hud-compass {
+  /* W–N–E–S spacing (1.5× prior); CompassHud reads for scroll math — keep in sync with .hud-compass-cell */
+  --compass-cell-w: 583px;
   position: absolute;
   z-index: 3;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(520px, 96vw);
+  width: min(1400px, 98vw);
   padding: 4px 0 6px;
   pointer-events: none;
   user-select: none;
@@ -40,7 +42,7 @@ body {
 
 .hud-compass-strip-wrap {
   position: relative;
-  height: 26px;
+  height: 28px;
   margin: 0 auto;
   overflow: hidden;
   border-radius: 0 0 8px 8px;
@@ -67,12 +69,15 @@ body {
 }
 
 .hud-compass-cell {
-  flex: 0 0 52px;
-  width: 52px;
+  flex: 0 0 var(--compass-cell-w);
+  width: var(--compass-cell-w);
+  max-width: var(--compass-cell-w);
+  min-width: 0;
+  box-sizing: border-box;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
   color: rgba(244, 233, 200, 0.88);
   opacity: 0.92;
 }
@@ -155,6 +160,23 @@ body {
 }
 
 .hud-safe.hidden {
+  display: none;
+}
+
+.hud-creative {
+  position: absolute;
+  top: 52px;
+  right: 16px;
+  padding: 6px 12px;
+  background: rgba(55, 40, 90, 0.7);
+  border: 1px solid rgba(180, 160, 240, 0.4);
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hud-creative.hidden {
   display: none;
 }
 
@@ -246,6 +268,14 @@ body {
     color 0.12s ease;
 }
 
+.weapon-slot.weapon-slot--owned {
+  color: rgba(244, 233, 200, 0.88);
+}
+
+.weapon-slot.weapon-slot--locked {
+  opacity: 0.45;
+}
+
 .weapon-slot.weapon-slot--active {
   border-color: rgba(212, 168, 72, 0.85);
   background: rgba(212, 168, 72, 0.22);
@@ -270,6 +300,14 @@ body {
   margin: 0;
   font-size: 12px;
   opacity: 0.95;
+}
+
+.hud-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  opacity: 0.88;
 }
 
 .join-panel {

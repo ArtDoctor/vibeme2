@@ -1,7 +1,6 @@
 import { Group, PerspectiveCamera } from "three";
 import type { CombatInput } from "../player/CombatInput";
 import type { SnapshotPlayer } from "../net/types";
-import { normalizeWeaponKind } from "../net/snapshotNormalize";
 import {
   animateWeaponGroups,
   buildWeaponGroupsFirstPerson,
@@ -32,11 +31,11 @@ export class FirstPersonWeapon {
    * available so the view stays responsive between server ticks.
    */
   sync(me: SnapshotPlayer, combat: CombatInput | null): void {
-    const weapon = normalizeWeaponKind(combat?.weapon ?? me.weapon);
-    const blocking =
-      weapon === "shield" && (combat?.getBlocking() ?? me.blocking);
+    const mainHand = combat?.getCurrentMainHand() ?? me.mainHand;
+    const offHand = combat?.getCurrentOffHand() ?? me.offHand;
+    const blocking = combat?.getBlocking() ?? me.blocking;
     const bowCharge =
-      weapon === "bow" && combat !== null
+      mainHand === "shortBow" && combat !== null
         ? combat.getBowChargeVisual()
         : me.bowCharge;
 
@@ -44,10 +43,13 @@ export class FirstPersonWeapon {
       this.groups.sword,
       this.groups.shield,
       this.groups.bow,
-      weapon,
+      mainHand,
+      offHand,
     );
     animateWeaponGroups(this.groups.sword, this.groups.shield, this.groups.bow, {
-      weapon,
+      ...me,
+      mainHand,
+      offHand,
       swingT: me.swingT,
       blocking,
       bowCharge,

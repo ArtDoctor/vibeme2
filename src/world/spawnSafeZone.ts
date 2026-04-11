@@ -1,20 +1,37 @@
 /**
- * Spawn castle safe zone — Milestone 1.5 (`docs/TASKS.md`).
- * Server must use this AABB before applying PvP damage, mob aggro, or spawning mobs
- * inside the courtyard. Client uses it only for UI.
+ * PvP-safe courtyards — Milestone 1.5 (`docs/TASKS.md`).
+ * Server must use these AABBs before applying PvP damage, mob aggro, or spawning mobs
+ * inside a courtyard. Client uses them only for UI and matching visuals.
  */
 
-export const SPAWN_SAFE_ZONE_AABB = {
-  minX: -5,
-  maxX: 5,
-  minZ: -5,
-  maxZ: 5,
-} as const;
+import { TERRAIN_HALF_SIZE } from "../scene/terrain";
+
+/** Inset from ±terrain edge for the north and corner outposts (matches server `SAFE_ZONE_EDGE_INSET`). */
+export const SAFE_ZONE_EDGE_INSET = 15;
+
+/** Half-size of each square courtyard on X and Z. */
+export const SPAWN_SAFE_ZONE_HALF = 5;
+
+const H = SPAWN_SAFE_ZONE_HALF;
+const E = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+
+/** All safe zones: spawn castle, north edge, and four corners (matches `SPAWN_SAFE_ZONES` in `server/src/world.rs`). */
+export const ALL_SPAWN_SAFE_ZONE_AABBS = [
+  { minX: -H, maxX: H, minZ: -H, maxZ: H },
+  { minX: -H, maxX: H, minZ: E - H, maxZ: E + H },
+  { minX: -E - H, maxX: -E + H, minZ: E - H, maxZ: E + H },
+  { minX: E - H, maxX: E + H, minZ: E - H, maxZ: E + H },
+  { minX: -E - H, maxX: -E + H, minZ: -E - H, maxZ: -E + H },
+  { minX: E - H, maxX: E + H, minZ: -E - H, maxZ: -E + H },
+] as const;
+
+/** Primary spawn courtyard only (backward compat). */
+export const SPAWN_SAFE_ZONE_AABB = ALL_SPAWN_SAFE_ZONE_AABBS[0];
 
 export type SpawnSafeZoneAabb = typeof SPAWN_SAFE_ZONE_AABB;
 
-/** Half-size of the square courtyard on X and Z (matches `SPAWN_SAFE_ZONE_AABB`). */
-export const SPAWN_COURTYARD_HALF = 5;
+/** Half-size of the square courtyard on X and Z (matches primary `SPAWN_SAFE_ZONE_AABB`). */
+export const SPAWN_COURTYARD_HALF = SPAWN_SAFE_ZONE_HALF;
 
 export const CASTLE_WALL_THICKNESS = 0.6;
 /** Taller than `MAX_STEP_UP` in FirstPersonControls so step-up never clears walls. */
@@ -22,7 +39,33 @@ export const CASTLE_WALL_HEIGHT = 3.5;
 /** Gate gap is 2 × this width on X at the south wall. */
 export const CASTLE_GATE_HALF_WIDTH = 1.5;
 
+/** Distance from terrain edge to the center of each non-spawn outpost (north + corners). */
+export const SAFE_ZONE_OUTPOST_EDGE_CENTER = E;
+
+/**
+ * True if (x,z) is within `radius` of any safe-zone castle (spawn + outposts).
+ * Used to keep procedural rocks/mountains out of courtyards.
+ */
+export function isNearAnySafeZoneCastle(
+  x: number,
+  z: number,
+  radius: number,
+): boolean {
+  if (Math.hypot(x, z) < radius) {
+    return true;
+  }
+  const c: [number, number][] = [
+    [0, E],
+    [-E, E],
+    [E, E],
+    [-E, -E],
+    [E, -E],
+  ];
+  return c.some(([cx, cz]) => Math.hypot(x - cx, z - cz) < radius);
+}
+
 export function isPointInSpawnSafeZone(x: number, z: number): boolean {
-  const s = SPAWN_SAFE_ZONE_AABB;
-  return x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ;
+  return ALL_SPAWN_SAFE_ZONE_AABBS.some(
+    (s) => x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ,
+  );
 }

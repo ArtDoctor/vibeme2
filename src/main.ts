@@ -14,6 +14,7 @@ const gameCanvas: HTMLCanvasElement = canvasEl;
 
 const hudHint = document.getElementById("hud") ?? undefined;
 const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
+const creativeHint = document.getElementById("hud-creative") ?? undefined;
 const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const hudCompass = document.getElementById("hud-compass") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
@@ -102,6 +103,7 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       canvas: gameCanvas,
       hudHint,
       safeZoneHint,
+      creativeHint,
       hudCombat,
       localPlayerId: mp.id,
       compassEl: hudCompass,

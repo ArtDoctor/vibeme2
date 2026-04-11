@@ -10,6 +10,7 @@ src/
                                 Wires modules together; never contains gameplay.
     RemotePlayers.ts            Box avatars + primitive weapons for remotes.
     WorldArrows.ts              Server-synced arrow meshes.
+    WorldPickups.ts             Server-synced world pickup meshes for basic gear.
   scene/
     DesertScene.ts              Builds terrain mesh, lighting, mountains, rocks.
                                 Returns ONLY what gameplay needs (height function,
@@ -23,7 +24,7 @@ src/
                                 creative fly mode); uses `circleAabbXZ`.
     circleAabbXZ.ts             Pure circle-vs-AABB XZ resolution (tested). Server
                                 mirrors the same math in `server/src/world.rs`.
-    CombatInput.ts              Local weapon/block/bow intents; outbound fields are
+    CombatInput.ts              Local loadout/weapon/block/bow intents; outbound fields are
                                 merged into WebSocket `input` messages.
     PlayerState.ts              Plain interface — will be mirrored server-side.
   combat/
@@ -44,9 +45,12 @@ messages plus the 20 Hz tick loop.
 server/src/
   main.rs                       Thin transport entry. Axum routes, WebSocket session flow,
                                 snapshot broadcast loop, and no gameplay rules.
+  items.rs                      Authoritative inventory/equipment/pickup item kinds and
+                                armor/loadout helpers.
   protocol.rs                   JSON wire types for join/input/welcome/joinError.
   sim.rs                        Authoritative simulation state, input application, world tick,
-                                snapshot building, and headless scenario tests.
+                                pickup spawning/collection, snapshot building, and headless
+                                scenario tests.
   combat.rs                     Pure-ish combat math and projectile helpers.
   mobs.rs                       Mob AI/state updates and spawn rules.
   validate.rs                   Authoritative movement clamp against terrain + colliders.
@@ -73,6 +77,21 @@ On the server, the equivalent rule is: `main.rs` is transport only, while
 `sim.rs` owns authoritative world state. That makes world behavior testable
 without sockets and keeps future work like economy, inventory, or boss logic
 out of the WebSocket loop.
+
+## Inventory and pickups
+
+Milestone 2 now treats gear as authoritative server state instead of a single
+active weapon string:
+
+- `server/src/items.rs` defines inventory item ids, equipped main/off-hand
+  slots, armor slots, and pickup kinds.
+- `server/src/sim.rs` owns actual player inventories/equipment plus the live
+  pickup population. It refills basic shield/bow/armor pickups back to target
+  counts on a timer and grants the corresponding items on proximity pickup.
+- Snapshots carry both the compact combat pose (`weapon`, `blocking`,
+  `bowCharge`) and the richer loadout state (`mainHand`, `offHand`, `armor`,
+  `inventory`, `pickups`) so the client can render correct weapons, armor, and
+  world pickups without becoming authoritative.
 
 ## Deployment (planned)
 

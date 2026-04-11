@@ -27,7 +27,9 @@ pub enum ClientMsg {
         #[serde(default)]
         sprinting: bool,
         #[serde(default)]
-        weapon: Option<String>,
+        main_hand: Option<String>,
+        #[serde(default)]
+        off_hand: Option<String>,
         #[serde(default)]
         blocking: bool,
         #[serde(default)]

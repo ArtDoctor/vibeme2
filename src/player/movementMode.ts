@@ -1,4 +1,8 @@
 export const SPEED_BOOST_MULTIPLIER = 3;
+/** Baseline run speed (m/s). Half of the legacy default. */
+export const DEFAULT_MOVE_SPEED = 7.5 / 2;
+/** Creative mode horizontal speed (m/s): 3× legacy default 7.5. */
+export const CREATIVE_MOVE_SPEED = 7.5 * 3;
 export const FLY_TOGGLE_WINDOW_MS = 350;
 
 /** Extra movement flags that accompany the local pose. */
