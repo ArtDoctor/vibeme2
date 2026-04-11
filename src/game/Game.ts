@@ -41,6 +41,8 @@ export interface GameOptions {
   compassEl?: HTMLElement;
   /** Buy UI (Milestone 4 shops). */
   shopPanel?: HTMLElement;
+  /** World position x, y, z (top-right). */
+  coordsEl?: HTMLElement;
 }
 
 export class Game {
@@ -66,6 +68,7 @@ export class Game {
   private localPlayerSnapshot: SnapshotPlayer | null = null;
   private multiplayer: MultiplayerClient | null = null;
   private readonly shopPanel?: HTMLElement;
+  private readonly coordsEl?: HTMLElement;
   private shopOpen = false;
   private shopAtIndex: number | null = null;
   private readonly onDocKeydown = (e: KeyboardEvent): void => {
@@ -154,6 +157,10 @@ export class Game {
     }
 
     this.shopPanel = options.shopPanel;
+    this.coordsEl = options.coordsEl;
+    if (this.coordsEl) {
+      this.coordsEl.classList.remove("hidden");
+    }
     if (this.shopPanel) {
       const closeBtn = this.shopPanel.querySelector("[data-shop-close]");
       if (closeBtn instanceof HTMLButtonElement) {
@@ -399,6 +406,11 @@ export class Game {
       this.worldPickups?.update(delta);
       this.worldMobs?.update(delta);
       const eye = this.controls.getNetworkPose();
+      const coordsHud = this.coordsEl;
+      if (coordsHud) {
+        const fmt = (v: number): string => v.toFixed(1);
+        coordsHud.textContent = `x ${fmt(eye.x)}, y ${fmt(eye.y)}, z ${fmt(eye.z)}`;
+      }
       this.compassHud?.update(
         horizontalYawFromCamera(this.camera),
         eye.x,
@@ -466,6 +478,7 @@ export class Game {
     this.worldPickups?.dispose();
     this.worldMobs?.dispose();
     this.compassHud?.dispose();
+    this.coordsEl?.classList.add("hidden");
     if (this.localThirdPersonRig) {
       this.scene.remove(this.localThirdPersonRig);
     }

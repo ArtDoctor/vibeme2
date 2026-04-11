@@ -1,14 +1,20 @@
 import {
   BoxGeometry,
+  CanvasTexture,
   Color,
   ConeGeometry,
   DirectionalLight,
   Fog,
+  Group,
   HemisphereLight,
   Mesh,
   MeshLambertMaterial,
+  NearestFilter,
   PlaneGeometry,
   Scene,
+  Sprite,
+  SpriteMaterial,
+  SRGBColorSpace,
   Vector3,
 } from "three";
 import {
@@ -21,9 +27,10 @@ import {
   type SpawnSafeZoneAabb,
   isNearAnySafeZoneCastle,
   isPointInSpawnSafeZone,
+  safeZoneCenterXZ,
 } from "../world/spawnSafeZone";
-import { SHOP_POSITIONS } from "../world/shops";
 import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
+import { SHOP_SAFE_ZONE_COUNT } from "../world/shops";
 import { hash2 } from "../utils/math";
 import {
   TERRAIN_HALF_SIZE,
@@ -206,26 +213,26 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, -outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, -outE);
 
-  const shopHutMat = new MeshLambertMaterial({ color: 0x6a5a4a });
-  const shopHutMatAdvanced = new MeshLambertMaterial({ color: 0x5a4a3a });
-  const shopNpcMat = new MeshLambertMaterial({ color: 0xc8a070 });
-  const shopNpcMatAdvanced = new MeshLambertMaterial({ color: 0xe8b060 });
-  for (let si = 0; si < SHOP_POSITIONS.length; si += 1) {
-    const p = SHOP_POSITIONS[si];
-    const advanced = isAdvancedShopSafeZoneIndex(si);
-    const y0 = sampleTerrainHeight(p.x, p.z);
-    const hut = new Mesh(
-      new BoxGeometry(3.4, 2.4, 3.0),
-      advanced ? shopHutMatAdvanced : shopHutMat,
+  const shopWallMat = new MeshLambertMaterial({ color: 0x7a6a58 });
+  const shopWallMatAdvanced = new MeshLambertMaterial({ color: 0x5c4d3e });
+  const shopRoofMat = new MeshLambertMaterial({ color: 0x5a5045 });
+  const shopRoofMatAdvanced = new MeshLambertMaterial({ color: 0x4a4036 });
+  const shopTableMat = new MeshLambertMaterial({ color: 0x6b5540 });
+  for (let si = 0; si < SHOP_SAFE_ZONE_COUNT; si += 1) {
+    const c = safeZoneCenterXZ(si);
+    addShopStall(
+      scene,
+      colliders,
+      sampleTerrainHeight,
+      c.x,
+      c.z,
+      isAdvancedShopSafeZoneIndex(si),
+      shopWallMat,
+      shopWallMatAdvanced,
+      shopRoofMat,
+      shopRoofMatAdvanced,
+      shopTableMat,
     );
-    hut.position.set(p.x, y0 + 1.2, p.z);
-    scene.add(hut);
-    const npc = new Mesh(
-      new BoxGeometry(0.55, 1.5, 0.42),
-      advanced ? shopNpcMatAdvanced : shopNpcMat,
-    );
-    npc.position.set(p.x + 1.15, y0 + 0.78, p.z + 0.25);
-    scene.add(npc);
   }
 
   // TODO(multiplayer): mob spawners, boss arenas, team flags.
@@ -299,4 +306,267 @@ function addSpawnCastle(
   const southRightCx = (centerX + gateHalf + southEastOuter) / 2;
   addSegment(southLeftCx, southZ, southLeftW, t);
   addSegment(southRightCx, southZ, southRightW, t);
+}
+
+function stallOutwardDir(
+  centerX: number,
+  centerZ: number,
+): { fx: number; fz: number; rx: number; rz: number } {
+  const h = Math.hypot(centerX, centerZ);
+  let fx: number;
+  let fz: number;
+  if (h < 0.01) {
+    fx = 0;
+    fz = 1;
+  } else {
+    fx = centerX / h;
+    fz = centerZ / h;
+  }
+  return { fx, fz, rx: -fz, rz: fx };
+}
+
+function pushStallObbWall(
+  colliders: AABBCollider[],
+  cx: number,
+  cz: number,
+  y0: number,
+  fx: number,
+  fz: number,
+  rx: number,
+  rz: number,
+  alongFwd: number,
+  alongRight: number,
+  halfAlongRight: number,
+  halfAlongFwd: number,
+  height: number,
+): void {
+  const px = cx + fx * alongFwd + rx * alongRight;
+  const pz = cz + fz * alongFwd + rz * alongRight;
+  const corners: [number, number][] = [
+    [
+      px + rx * halfAlongRight + fx * halfAlongFwd,
+      pz + rz * halfAlongRight + fz * halfAlongFwd,
+    ],
+    [
+      px - rx * halfAlongRight + fx * halfAlongFwd,
+      pz - rz * halfAlongRight + fz * halfAlongFwd,
+    ],
+    [
+      px + rx * halfAlongRight - fx * halfAlongFwd,
+      pz + rz * halfAlongRight - fz * halfAlongFwd,
+    ],
+    [
+      px - rx * halfAlongRight - fx * halfAlongFwd,
+      pz - rz * halfAlongRight - fz * halfAlongFwd,
+    ],
+  ];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const [x, z] of corners) {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minZ = Math.min(minZ, z);
+    maxZ = Math.max(maxZ, z);
+  }
+  colliders.push({
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    topY: y0 + height,
+  });
+}
+
+function makeMerchantTitleSprite(): Sprite {
+  const canvas = document.createElement("canvas");
+  const w = 640;
+  const h = 160;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = 'bold 56px system-ui, "Segoe UI", sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeStyle = "rgba(0,0,0,0.88)";
+    ctx.lineWidth = 10;
+    ctx.strokeText("Merchant", w / 2, h / 2);
+    ctx.fillStyle = "#f0dca8";
+    ctx.fillText("Merchant", w / 2, h / 2);
+  }
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  tex.magFilter = NearestFilter;
+  tex.minFilter = NearestFilter;
+  const mat = new SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new Sprite(mat);
+  sprite.scale.set(3.8, 0.95, 1);
+  sprite.position.set(0, 2.42, 0);
+  return sprite;
+}
+
+/**
+ * Open-front stall against the outer courtyard wall: three walls + roof, counter table, humanoid NPC.
+ * Local +Z = toward the map edge (wall behind the vendor). Must stay aligned with `add_shop_stall_colliders` in `server/src/world.rs`.
+ */
+function addShopStall(
+  scene: Scene,
+  colliders: AABBCollider[],
+  sampleGround: (x: number, z: number) => number,
+  centerX: number,
+  centerZ: number,
+  advanced: boolean,
+  wallMat: MeshLambertMaterial,
+  wallMatAdv: MeshLambertMaterial,
+  roofMat: MeshLambertMaterial,
+  roofMatAdv: MeshLambertMaterial,
+  tableMat: MeshLambertMaterial,
+): void {
+  const { fx, fz, rx, rz } = stallOutwardDir(centerX, centerZ);
+  const y0 = sampleGround(centerX, centerZ);
+  const wMat = advanced ? wallMatAdv : wallMat;
+  const rMat = advanced ? roofMatAdv : roofMat;
+
+  const stall = new Group();
+  stall.position.set(centerX, y0, centerZ);
+  stall.rotation.y = Math.atan2(fx, fz);
+
+  const back = new Mesh(
+    new BoxGeometry(3.5, 2.7, 0.32),
+    wMat,
+  );
+  back.position.set(0, 1.35, 3.88);
+  stall.add(back);
+
+  const leftWall = new Mesh(new BoxGeometry(0.3, 2.5, 1.48), wMat);
+  leftWall.position.set(-1.62, 1.25, 3.1);
+  stall.add(leftWall);
+
+  const rightWall = new Mesh(new BoxGeometry(0.3, 2.5, 1.48), wMat);
+  rightWall.position.set(1.62, 1.25, 3.1);
+  stall.add(rightWall);
+
+  const roof = new Mesh(new BoxGeometry(3.85, 0.22, 2.85), rMat);
+  roof.position.set(0, 2.86, 3.05);
+  stall.add(roof);
+
+  const table = new Mesh(new BoxGeometry(2.2, 0.07, 0.95), tableMat);
+  table.position.set(0, 0.92, 2.08);
+  stall.add(table);
+
+  const legFL = new Mesh(new BoxGeometry(0.12, 0.88, 0.12), tableMat);
+  legFL.position.set(-0.95, 0.48, 1.68);
+  stall.add(legFL);
+  const legFR = new Mesh(new BoxGeometry(0.12, 0.88, 0.12), tableMat);
+  legFR.position.set(0.95, 0.48, 1.68);
+  stall.add(legFR);
+  const legBL = new Mesh(new BoxGeometry(0.12, 0.88, 0.12), tableMat);
+  legBL.position.set(-0.95, 0.48, 2.48);
+  stall.add(legBL);
+  const legBR = new Mesh(new BoxGeometry(0.12, 0.88, 0.12), tableMat);
+  legBR.position.set(0.95, 0.48, 2.48);
+  stall.add(legBR);
+
+  const skin = new MeshLambertMaterial({ color: advanced ? 0xe8b898 : 0xd8a878 });
+  const shirt = new MeshLambertMaterial({ color: advanced ? 0x6a7a72 : 0x5c6a62 });
+  const pants = new MeshLambertMaterial({ color: 0x4a4f58 });
+
+  const vendor = new Group();
+  vendor.position.set(0, 0, 3.35);
+  vendor.rotation.y = Math.PI;
+
+  const legL = new Mesh(new BoxGeometry(0.22, 0.42, 0.24), pants);
+  legL.position.set(-0.16, 0.21, 0);
+  const legR = new Mesh(new BoxGeometry(0.22, 0.42, 0.24), pants);
+  legR.position.set(0.16, 0.21, 0);
+  const torso = new Mesh(new BoxGeometry(0.52, 0.62, 0.34), shirt);
+  torso.position.set(0, 0.72, 0);
+  const armL = new Mesh(new BoxGeometry(0.14, 0.48, 0.14), shirt);
+  armL.position.set(-0.38, 0.72, 0.06);
+  const armR = new Mesh(new BoxGeometry(0.14, 0.48, 0.14), shirt);
+  armR.position.set(0.38, 0.72, 0.06);
+  const head = new Mesh(new BoxGeometry(0.34, 0.34, 0.32), skin);
+  head.position.set(0, 1.22, 0);
+
+  vendor.add(legL);
+  vendor.add(legR);
+  vendor.add(torso);
+  vendor.add(armL);
+  vendor.add(armR);
+  vendor.add(head);
+
+  const title = makeMerchantTitleSprite();
+  vendor.add(title);
+
+  stall.add(vendor);
+  scene.add(stall);
+
+  pushStallObbWall(
+    colliders,
+    centerX,
+    centerZ,
+    y0,
+    fx,
+    fz,
+    rx,
+    rz,
+    3.88,
+    0,
+    1.75,
+    0.16,
+    2.75,
+  );
+  pushStallObbWall(
+    colliders,
+    centerX,
+    centerZ,
+    y0,
+    fx,
+    fz,
+    rx,
+    rz,
+    3.1,
+    -1.62,
+    0.15,
+    0.74,
+    2.55,
+  );
+  pushStallObbWall(
+    colliders,
+    centerX,
+    centerZ,
+    y0,
+    fx,
+    fz,
+    rx,
+    rz,
+    3.1,
+    1.62,
+    0.15,
+    0.74,
+    2.55,
+  );
+  pushStallObbWall(
+    colliders,
+    centerX,
+    centerZ,
+    y0,
+    fx,
+    fz,
+    rx,
+    rz,
+    2.08,
+    0,
+    1.1,
+    0.475,
+    0.94,
+  );
 }

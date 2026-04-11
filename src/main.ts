@@ -7,7 +7,7 @@ import {
 
 const canvasEl = document.getElementById("game-canvas");
 if (!(canvasEl instanceof HTMLCanvasElement)) {
-  throw new Error("vibeme2: #game-canvas not found or not a <canvas>");
+  throw new Error("solis-gladius: #game-canvas not found or not a <canvas>");
 }
 /** Narrowed for async handlers (TS does not keep `instanceof` narrowing in closures). */
 const gameCanvas: HTMLCanvasElement = canvasEl;
@@ -17,6 +17,7 @@ const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
 const creativeHint = document.getElementById("hud-creative") ?? undefined;
 const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const hudCompass = document.getElementById("hud-compass") ?? undefined;
+const hudCoords = document.getElementById("hud-coords") ?? undefined;
 const shopPanel = document.getElementById("shop-panel") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
 const joinNickname = document.getElementById("join-nickname");
@@ -120,6 +121,7 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       hudCombat,
       localPlayerId: mp.id,
       compassEl: hudCompass,
+      coordsEl: hudCoords,
       shopPanel,
     });
     game.attachMultiplayer(mp);

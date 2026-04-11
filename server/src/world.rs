@@ -28,19 +28,36 @@ pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 7] = {
     ]
 };
 
-/// Courtyard center (x, z) for each entry in [`SPAWN_SAFE_ZONES`] — Milestone 4 shop stalls.
-pub const SAFE_ZONE_SHOP_CENTERS_XZ: [(f64, f64); 7] = {
+/// Offset from courtyard center toward the map edge — matches `SHOP_SERVICE_SPOT_OFFSET` in `shops.ts`.
+const SHOP_SERVICE_SPOT_OFFSET: f64 = 1.85;
+
+fn shop_service_spot(cx: f64, cz: f64) -> (f64, f64) {
+    let h2 = cx * cx + cz * cz;
+    if h2 < 1e-8 {
+        return (cx, cz + SHOP_SERVICE_SPOT_OFFSET);
+    }
+    let h = h2.sqrt();
+    (
+        cx + (cx / h) * SHOP_SERVICE_SPOT_OFFSET,
+        cz + (cz / h) * SHOP_SERVICE_SPOT_OFFSET,
+    )
+}
+
+/// World XZ for shop buy/sell distance checks — `shop_index` matches [`SPAWN_SAFE_ZONES`] order.
+pub fn safe_zone_shop_spot_xz(shop_index: usize) -> Option<(f64, f64)> {
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
-    [
-        (0.0, 0.0),
-        (0.0, e),
-        (-e, e),
-        (e, e),
-        (-e, -e),
-        (e, -e),
-        (0.0, -e),
-    ]
-};
+    let (cx, cz) = match shop_index {
+        0 => (0.0, 0.0),
+        1 => (0.0, e),
+        2 => (-e, e),
+        3 => (e, e),
+        4 => (-e, -e),
+        5 => (e, -e),
+        6 => (0.0, -e),
+        _ => return None,
+    };
+    Some(shop_service_spot(cx, cz))
+}
 
 pub const EYE_HEIGHT: f64 = 1.65;
 pub const PLAYER_RADIUS: f64 = 0.35;
@@ -148,7 +165,95 @@ pub fn build_colliders() -> Vec<AabbCollider> {
     add_spawn_castle(&mut colliders, out_e, out_e);
     add_spawn_castle(&mut colliders, -out_e, -out_e);
     add_spawn_castle(&mut colliders, out_e, -out_e);
+    add_shop_stall_colliders(&mut colliders);
     colliders
+}
+
+fn stall_fwd_from_center(cx: f64, cz: f64) -> (f64, f64) {
+    let h2 = cx * cx + cz * cz;
+    if h2 < 1e-8 {
+        return (0.0, 1.0);
+    }
+    let h = h2.sqrt();
+    (cx / h, cz / h)
+}
+
+fn push_stall_obb_wall(
+    colliders: &mut Vec<AabbCollider>,
+    cx: f64,
+    cz: f64,
+    y0: f64,
+    fx: f64,
+    fz: f64,
+    rx: f64,
+    rz: f64,
+    along_fwd: f64,
+    along_right: f64,
+    half_along_right: f64,
+    half_along_fwd: f64,
+    height: f64,
+) {
+    let px = cx + fx * along_fwd + rx * along_right;
+    let pz = cz + fz * along_fwd + rz * along_right;
+    let corners = [
+        (
+            px + rx * half_along_right + fx * half_along_fwd,
+            pz + rz * half_along_right + fz * half_along_fwd,
+        ),
+        (
+            px - rx * half_along_right + fx * half_along_fwd,
+            pz - rz * half_along_right + fz * half_along_fwd,
+        ),
+        (
+            px + rx * half_along_right - fx * half_along_fwd,
+            pz + rz * half_along_right - fz * half_along_fwd,
+        ),
+        (
+            px - rx * half_along_right - fx * half_along_fwd,
+            pz - rz * half_along_right - fz * half_along_fwd,
+        ),
+    ];
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_z = f64::INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+    for (x, z) in corners {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+    colliders.push(AabbCollider {
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        top_y: y0 + height,
+    });
+}
+
+/// Matches shop stall meshes in `DesertScene.ts` (`addShopStall`).
+fn add_shop_stall_colliders(colliders: &mut Vec<AabbCollider>) {
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    let centers = [
+        (0.0_f64, 0.0_f64),
+        (0.0_f64, e),
+        (-e, e),
+        (e, e),
+        (-e, -e),
+        (e, -e),
+        (0.0_f64, -e),
+    ];
+    for &(cx, cz) in &centers {
+        let (fx, fz) = stall_fwd_from_center(cx, cz);
+        let rx = -fz;
+        let rz = fx;
+        let y0 = sample_terrain_height(cx, cz);
+        push_stall_obb_wall(colliders, cx, cz, y0, fx, fz, rx, rz, 3.88, 0.0, 1.75, 0.16, 2.75);
+        push_stall_obb_wall(colliders, cx, cz, y0, fx, fz, rx, rz, 3.1, -1.62, 0.15, 0.74, 2.55);
+        push_stall_obb_wall(colliders, cx, cz, y0, fx, fz, rx, rz, 3.1, 1.62, 0.15, 0.74, 2.55);
+        push_stall_obb_wall(colliders, cx, cz, y0, fx, fz, rx, rz, 2.08, 0.0, 1.1, 0.475, 0.94);
+    }
 }
 
 /// Matches `isNearAnySafeZoneCastle` in `spawnSafeZone.ts` (procedural clearance).

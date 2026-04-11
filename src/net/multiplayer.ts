@@ -1,7 +1,7 @@
 import type { SnapshotMsg, WelcomeMsg } from "./types";
 import { normalizeSnapshotMsg } from "./snapshotNormalize";
 
-const DEFAULT_SESSION_KEY = "vibeme2.session";
+const DEFAULT_SESSION_KEY = "solis-gladius.session";
 
 function wsUrlFromPage(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::combat::{
     arrow_hits_player, damage_after_armor, damage_after_shield_melee,
     damage_after_shield_ranged, frontal_dot, integrate_arrow, melee_hit_valid,
-    point_in_spawn_safe_zone, spawn_arrow_from_mob, spawn_arrow_from_player, Arrow, WeaponKind,
+    point_in_spawn_safe_zone, spawn_arrow_from_player, spawn_boss_projectile, Arrow, WeaponKind,
     ARROW_DAMAGE, BOW_MIN_CHARGE, MAX_HP, MAX_STAMINA, STAMINA_BLOCK_PER_S,
     STAMINA_BOW_CHARGE_PER_S, STAMINA_BOW_FIRE, STAMINA_MELEE, STAMINA_REGEN_PER_S,
     SWING_COOLDOWN_S,
@@ -25,7 +25,7 @@ use crate::mobs::{
 };
 use crate::validate::clamp_claimed_position;
 use crate::world::{
-    sample_terrain_height, AabbCollider, EYE_HEIGHT, SAFE_ZONE_SHOP_CENTERS_XZ,
+    sample_terrain_height, safe_zone_shop_spot_xz, AabbCollider, EYE_HEIGHT,
 };
 
 const PLAYER_VISIBILITY_RADIUS: f64 = 65.0;
@@ -36,7 +36,7 @@ const PICKUP_VISIBILITY_RADIUS: f64 = 78.0;
 const PICKUP_RADIUS: f64 = 1.25;
 const PICKUP_RESPAWN_S: f64 = 4.0;
 
-/// One stall per PvP-safe courtyard — indices match [`SAFE_ZONE_SHOP_CENTERS_XZ`] / client `ALL_SPAWN_SAFE_ZONE_AABBS`.
+/// One stall per PvP-safe courtyard — indices match client `ALL_SPAWN_SAFE_ZONE_AABBS` / `safe_zone_shop_spot_xz`.
 const SHOP_INTERACT_RADIUS: f64 = 3.85;
 
 #[derive(Clone, Copy)]
@@ -420,8 +420,11 @@ fn mob_kind_tag(mob: &Mob) -> &'static str {
 
 fn pickup_target_count(kind: PickupKind) -> u32 {
     match kind {
-        // Milestone 4: gear comes from shops, mob drops, and player death loot — not infinite world rings.
-        PickupKind::Shield | PickupKind::Bow | PickupKind::Armor => 0,
+        // Ring layout in `pickup_slot_position`: 10 / 10 / 5 slots on the first ring each.
+        // Shops and mob drops still exist; world rings give discoverable gear away from safe zones.
+        PickupKind::Shield => 10,
+        PickupKind::Bow => 10,
+        PickupKind::Armor => 5,
         PickupKind::Gold | PickupKind::GearToken | PickupKind::Item => 0,
     }
 }
@@ -751,14 +754,14 @@ impl Simulation {
         self.players.contains_key(&id)
     }
 
-    /// Buy one unit from a safe-zone shop (`shop_index` matches `SAFE_ZONE_SHOP_CENTERS_XZ`).
+    /// Buy one unit from a safe-zone shop (`shop_index` matches `safe_zone_shop_spot_xz`).
     pub fn shop_buy(
         &mut self,
         player_id: Uuid,
         shop_index: usize,
         sku: &str,
     ) -> Result<(), &'static str> {
-        let Some(&(sx, sz)) = SAFE_ZONE_SHOP_CENTERS_XZ.get(shop_index) else {
+        let Some((sx, sz)) = safe_zone_shop_spot_xz(shop_index) else {
             return Err("Invalid shop.");
         };
         let Some(offer) = shop_offer_for(shop_index, sku) else {
@@ -794,7 +797,7 @@ impl Simulation {
         kind: InventoryItemKind,
         count: u16,
     ) -> Result<(), &'static str> {
-        let Some(&(sx, sz)) = SAFE_ZONE_SHOP_CENTERS_XZ.get(shop_index) else {
+        let Some((sx, sz)) = safe_zone_shop_spot_xz(shop_index) else {
             return Err("Invalid shop.");
         };
         let unit = sell_price_gold(kind);
@@ -950,7 +953,7 @@ impl Simulation {
         self.apply_mob_player_hits(mob_hits);
         for plan in pending_boss_arrows {
             if let Some(mob) = self.mobs.iter().find(|m| m.id == plan.mob_id) {
-                let arrow = spawn_arrow_from_mob(
+                let arrow = spawn_boss_projectile(
                     self.next_arrow_id,
                     mob.x,
                     mob.y,
@@ -958,6 +961,8 @@ impl Simulation {
                     plan.tx,
                     plan.ty,
                     plan.tz,
+                    plan.heavy,
+                    plan.speed,
                 );
                 self.next_arrow_id = self.next_arrow_id.wrapping_add(1);
                 self.arrows.push(arrow);
@@ -1673,7 +1678,7 @@ impl Simulation {
 mod tests {
     use super::*;
     use crate::items::{InventoryItemKind, MainHandKind, OffHandKind};
-    use crate::mobs::MobMoveState;
+    use crate::mobs::{MobKind, MobMoveState};
     use crate::world::build_colliders;
 
     fn create_creep(id: u32, x: f64, z: f64) -> Mob {
@@ -1690,6 +1695,7 @@ mod tests {
             wander_yaw: 0.0,
             wander_timer: 1.0,
             boss_cd: 0.0,
+            boss_attack_idx: 0,
             facing_yaw: 0.0,
             melee_cd: 0.0,
         }
@@ -1890,7 +1896,7 @@ mod tests {
     }
 
     #[test]
-    fn world_ring_shield_pickups_disabled_for_milestone4_shops() {
+    fn default_world_spawns_ring_gear_pickups() {
         let sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
@@ -1901,7 +1907,65 @@ mod tests {
                 .iter()
                 .filter(|pickup| pickup.kind == PickupKind::Shield)
                 .count(),
-            0
+            10
+        );
+        assert_eq!(
+            sim.pickups
+                .iter()
+                .filter(|pickup| pickup.kind == PickupKind::Bow)
+                .count(),
+            10
+        );
+        assert_eq!(
+            sim.pickups
+                .iter()
+                .filter(|pickup| pickup.kind == PickupKind::Armor)
+                .count(),
+            5
+        );
+    }
+
+    #[test]
+    fn default_config_spawns_world_loot_and_creeps_over_time() {
+        let colliders = build_colliders();
+        let mut sim = Simulation::new(SimConfig::default());
+        assert!(
+            sim.pickups.iter().any(|p| p.kind == PickupKind::Shield),
+            "expected world shield pickups at boot"
+        );
+        assert!(
+            sim.pickups.iter().any(|p| p.kind == PickupKind::Bow),
+            "expected world bow pickups at boot"
+        );
+        let frame0 = sim.build_snapshot_frame(0);
+        assert!(
+            frame0.pickups.len() >= 25,
+            "full snapshot should list ring gear (25+) plus any boot mobs; got {}",
+            frame0.pickups.len()
+        );
+
+        let dt = 1.0 / 20.0;
+        for tick in 1..=200_u64 {
+            sim.tick(dt, tick, &colliders);
+        }
+        let creeps = sim
+            .mobs
+            .iter()
+            .filter(|m| m.kind == MobKind::Creep)
+            .count();
+        assert!(
+            creeps >= 8,
+            "passive creep spawn should populate the map (got {creeps} creeps after 200 ticks)"
+        );
+        assert!(
+            sim.mobs.iter().any(|m| m.kind == MobKind::TrainingDummy),
+            "training dummy should remain"
+        );
+        assert!(
+            sim.mobs
+                .iter()
+                .any(|m| m.kind == MobKind::BossTank || m.kind == MobKind::BossSummoner),
+            "expected at least one world boss from default config"
         );
     }
 

@@ -28,7 +28,7 @@ use crate::protocol::{ClientMsg, JoinErrorOut, WelcomeOut};
 use crate::sim::{valid_nickname, InputCommand, SimConfig, Simulation, SnapshotFrame};
 use crate::world::{build_colliders, AabbCollider};
 
-const TICK_HZ: u32 = 20;
+const TICK_HZ: u32 = 30;
 const SESSION_KEY: &str = "vibeme2.session";
 
 #[derive(Clone)]

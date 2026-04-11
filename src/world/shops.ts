@@ -1,15 +1,42 @@
 import { safeZoneCenterXZ, isAdvancedShopSafeZoneIndex } from "./spawnSafeZone";
 
 /**
- * Must match `SAFE_ZONE_SHOP_CENTERS_XZ` in `server/src/world.rs` (one stall per safe courtyard).
+ * Must match `safe_zone_shop_spot_xz` in `server/src/world.rs` (one stall per safe courtyard).
  */
 export const SHOP_INTERACT_RADIUS = 3.85;
 
 export const SHOP_SAFE_ZONE_COUNT = 7;
 
-/** Stall positions — index = safe zone index (`ALL_SPAWN_SAFE_ZONE_AABBS`). */
+/** Distance from safe-zone center toward the map edge — counter / interaction spot (not courtyard middle). */
+export const SHOP_SERVICE_SPOT_OFFSET = 1.85;
+
+/** World XZ used for distance checks — offset from courtyard center along the outward radial (spawn uses +Z). */
+export function shopServiceSpotFromCenter(
+  cx: number,
+  cz: number,
+): { readonly x: number; readonly z: number } {
+  const h = Math.hypot(cx, cz);
+  let dx: number;
+  let dz: number;
+  if (h < 0.01) {
+    dx = 0;
+    dz = 1;
+  } else {
+    dx = cx / h;
+    dz = cz / h;
+  }
+  return {
+    x: cx + dx * SHOP_SERVICE_SPOT_OFFSET,
+    z: cz + dz * SHOP_SERVICE_SPOT_OFFSET,
+  };
+}
+
+/** Stall interaction positions — index = safe zone index (`ALL_SPAWN_SAFE_ZONE_AABBS`). */
 export const SHOP_POSITIONS: readonly { readonly x: number; readonly z: number }[] =
-  Array.from({ length: SHOP_SAFE_ZONE_COUNT }, (_, i) => safeZoneCenterXZ(i));
+  Array.from({ length: SHOP_SAFE_ZONE_COUNT }, (_, i) => {
+    const c = safeZoneCenterXZ(i);
+    return shopServiceSpotFromCenter(c.x, c.z);
+  });
 
 export interface ShopOfferClient {
   readonly sku: string;

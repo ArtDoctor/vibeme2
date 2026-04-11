@@ -19,7 +19,7 @@ export class FirstPersonWeapon {
   constructor(camera: PerspectiveCamera) {
     this.root = new Group();
     this.root.name = "fpWeapons";
-    this.root.scale.setScalar(1.48);
+    this.root.scale.setScalar(1.48 / 1.5);
     this.groups = buildWeaponGroupsFirstPerson();
     this.root.add(this.groups.sword, this.groups.shield, this.groups.bow);
     camera.add(this.root);

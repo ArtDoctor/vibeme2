@@ -201,7 +201,7 @@ export function createPlayerAvatarRig(nickname: string): Group {
   root.add(shield);
   root.add(bow);
   root.add(makeNicknameSprite(nickname));
-  root.scale.setScalar(2);
+  root.scale.setScalar(2 / 1.5);
   root.userData.sword = sword;
   root.userData.shield = shield;
   root.userData.bow = bow;

@@ -14,7 +14,8 @@ test("dev: open app, nickname, join — no crash", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "vibeme2" })).toBeVisible();
+  await expect(page.locator("#join-panel")).toBeVisible();
+  await expect(page.locator("#join-nickname")).toBeVisible();
   await page.locator("#join-nickname").fill("smoke_test");
   await page.locator("#join-submit").click();
 

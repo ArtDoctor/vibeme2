@@ -191,8 +191,8 @@ pub fn arrow_hits_player(ax: f64, ay: f64, az: f64, px: f64, eye_y: f64, pz: f64
     arrow_hits_vertical_cylinder(ax, ay, az, px, eye_y, pz, PLAYER_RADIUS)
 }
 
-/// Heavy projectile from a boss mob (`owner` is [`Uuid::nil()`]); uses lower speed than player arrows.
-pub fn spawn_arrow_from_mob(
+/// Boss mob projectile (`owner` is [`Uuid::nil()`]). Heavy shots are fully blocked by a frontal shield.
+pub fn spawn_boss_projectile(
     id: u32,
     x: f64,
     eye_y: f64,
@@ -200,15 +200,17 @@ pub fn spawn_arrow_from_mob(
     target_x: f64,
     target_eye_y: f64,
     target_z: f64,
+    heavy: bool,
+    speed: f64,
 ) -> Arrow {
     let hand_y = eye_y - 0.35;
     let tx = target_x - x;
     let ty = target_eye_y - hand_y;
     let tz = target_z - z;
     let len = (tx * tx + ty * ty + tz * tz).sqrt().max(1e-6);
-    let vx = tx / len * BOSS_ARROW_SPEED;
-    let vy = ty / len * BOSS_ARROW_SPEED;
-    let vz = tz / len * BOSS_ARROW_SPEED;
+    let vx = tx / len * speed;
+    let vy = ty / len * speed;
+    let vz = tz / len * speed;
     Arrow {
         id,
         owner: Uuid::nil(),
@@ -218,7 +220,7 @@ pub fn spawn_arrow_from_mob(
         vx,
         vy,
         vz,
-        heavy: true,
+        heavy,
         deals_damage: true,
     }
 }

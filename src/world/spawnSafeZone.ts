@@ -26,7 +26,7 @@ export const ALL_SPAWN_SAFE_ZONE_AABBS = [
   { minX: -H, maxX: H, minZ: -E - H, maxZ: -E + H },
 ] as const;
 
-/** Courtyard center for shop stalls — same order as `ALL_SPAWN_SAFE_ZONE_AABBS` / server `SAFE_ZONE_SHOP_CENTERS_XZ`. */
+/** Courtyard centers — same order as `ALL_SPAWN_SAFE_ZONE_AABBS` / server `SPAWN_SAFE_ZONES`. Shop interaction XZ is offset via `shops.ts`. */
 export function safeZoneCenterXZ(
   index: number,
 ): { readonly x: number; readonly z: number } {

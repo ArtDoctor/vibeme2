@@ -1,9 +1,10 @@
 //! Mobs: Milestone 3 AI — idle / chase / telegraphed attack, aggro + chained pull, safe-zone rules.
-//! Bosses: tank (slow heavy projectile), summoner (spawn adds). Authoritative HP lives here + `sim`.
+//! Bosses: tank (heavy shot, spread volley, melee stomp), summoner (summon adds + soul bolts).
+//! Authoritative HP lives here + `sim`.
 
 use uuid::Uuid;
 
-use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone};
+use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone, BOSS_ARROW_SPEED};
 use crate::world::{
     hash2, resolve_colliders_entity, sample_terrain_height, snap_to_ground_with_eye, AabbCollider,
     BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z, SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
@@ -40,18 +41,29 @@ pub const CHAIN_ANCHOR_RANGE: f64 = 14.0;
 
 pub const BOSS_SHOOT_CD_S: f64 = 2.65;
 pub const BOSS_SHOOT_WINDUP_S: f64 = 0.45;
+/// Quick triple shot; projectiles are non-heavy (shield soft-blocks only).
+pub const BOSS_VOLLEY_WINDUP_S: f64 = 0.32;
+pub const BOSS_VOLLEY_CD_S: f64 = 2.15;
+pub const BOSS_VOLLEY_SPEED: f64 = 34.0;
+pub const BOSS_VOLLEY_SPREAD: f64 = 1.35;
+pub const BOSS_STOMP_WINDUP_S: f64 = 0.58;
+pub const BOSS_STOMP_CD_S: f64 = 2.9;
+pub const BOSS_STOMP_RANGE: f64 = 4.15;
+pub const BOSS_STOMP_DAMAGE: f64 = 32.0;
 pub const BOSS_SUMMON_CD_S: f64 = 4.2;
 pub const BOSS_SUMMON_WINDUP_S: f64 = 0.35;
+pub const BOSS_BOLT_WINDUP_S: f64 = 0.28;
+pub const BOSS_BOLT_CD_S: f64 = 1.85;
+pub const BOSS_BOLT_SPEED: f64 = 40.0;
 pub const SUMMON_OFFSET: f64 = 2.8;
 
 /// Engagement memory for chained aggro (player recently hit a same-kind mob near this fight).
 pub const ENGAGEMENT_TTL_S: f64 = 4.0;
 
 /// Max creeps on the map at once (bosses + training dummy are not counted).
-/// Chosen so default world content stays under ~200 total mob entities.
-pub const MAX_MOBS: usize = 196;
+pub const MAX_MOBS: usize = 512;
 /// Passive creep spawns: lower = fills toward [`MAX_MOBS`] faster.
-pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.18;
+pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.09;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MobKind {
@@ -68,7 +80,10 @@ pub enum MobMoveState {
     MeleeWindup,
     MeleeRecover,
     ShootWindup,
+    VolleyWindup,
+    StompWindup,
     SummonWindup,
+    BoltWindup,
 }
 
 pub struct Mob {
@@ -84,6 +99,8 @@ pub struct Mob {
     pub wander_yaw: f64,
     pub wander_timer: f64,
     pub boss_cd: f64,
+    /// Rotates boss attack patterns (heavy / volley / stomp or summon / bolt).
+    pub boss_attack_idx: u8,
     pub facing_yaw: f64,
     /// Creep melee: time until another telegraphed swing can start.
     pub melee_cd: f64,
@@ -110,6 +127,8 @@ pub struct BossArrowPlan {
     pub tx: f64,
     pub ty: f64,
     pub tz: f64,
+    pub heavy: bool,
+    pub speed: f64,
 }
 
 #[inline]
@@ -145,6 +164,7 @@ pub fn spawn_training_dummy(id: u32) -> Mob {
         wander_yaw: 0.0,
         wander_timer: 0.0,
         boss_cd: 0.0,
+        boss_attack_idx: 0,
         facing_yaw: 0.0,
         melee_cd: 0.0,
     };
@@ -166,6 +186,7 @@ pub fn spawn_boss_tank(id: u32) -> Mob {
         wander_yaw: 0.0,
         wander_timer: 0.0,
         boss_cd: BOSS_SHOOT_CD_S * 0.4,
+        boss_attack_idx: 0,
         facing_yaw: 0.0,
         melee_cd: 0.0,
     };
@@ -187,6 +208,7 @@ pub fn spawn_boss_summoner(id: u32) -> Mob {
         wander_yaw: 0.0,
         wander_timer: 0.0,
         boss_cd: BOSS_SUMMON_CD_S * 0.5,
+        boss_attack_idx: 0,
         facing_yaw: 0.0,
         melee_cd: 0.0,
     };
@@ -305,6 +327,7 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
             wander_yaw: hash2(xf + 3.0, zf) * std::f64::consts::TAU,
             wander_timer: 1.5 + hash2(zf, xf) * 2.0,
             boss_cd: 0.0,
+            boss_attack_idx: 0,
             facing_yaw: 0.0,
             melee_cd: MOB_HIT_COOLDOWN_S * 0.5,
         };
@@ -429,6 +452,7 @@ fn spawn_creep_minion(id: u32, x: f64, z: f64, colliders: &[AabbCollider]) -> Op
         wander_yaw: 0.0,
         wander_timer: 2.0,
         boss_cd: 0.0,
+        boss_attack_idx: 0,
         facing_yaw: 0.0,
         melee_cd: 0.0,
     };
@@ -535,6 +559,7 @@ pub fn tick_mobs(
                     creep_pop,
                     *next_id,
                     world_tick,
+                    pending_arrows,
                 ) {
                     summoned.push(spawned);
                     creep_pop += 1;
@@ -652,7 +677,7 @@ fn tick_boss_tank(
     dt: f64,
     colliders: &[AabbCollider],
     pending_arrows: &mut Vec<BossArrowPlan>,
-    _hits: &mut Vec<MobPlayerHit>,
+    hits: &mut Vec<MobPlayerHit>,
 ) {
     match mob.move_state {
         MobMoveState::ShootWindup => {
@@ -666,11 +691,69 @@ fn tick_boss_tank(
                                 tx: px,
                                 ty: py,
                                 tz: pz,
+                                heavy: true,
+                                speed: BOSS_ARROW_SPEED,
                             });
                         }
                     }
                 }
                 mob.boss_cd = BOSS_SHOOT_CD_S;
+                mob.boss_attack_idx = mob.boss_attack_idx.wrapping_add(1);
+                mob.move_state = MobMoveState::Pursuing;
+            }
+        }
+        MobMoveState::VolleyWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if let Some(pid) = mob.aggro {
+                    if let Some((px, py, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            let dx = px - mob.x;
+                            let dz = pz - mob.z;
+                            let len = (dx * dx + dz * dz).sqrt().max(1e-6);
+                            let pxn = dx / len;
+                            let pzn = dz / len;
+                            let perp_x = -pzn;
+                            let perp_z = pxn;
+                            for i in -1_i32..=1 {
+                                let off = f64::from(i) * BOSS_VOLLEY_SPREAD;
+                                pending_arrows.push(BossArrowPlan {
+                                    mob_id: mob.id,
+                                    tx: px + perp_x * off,
+                                    ty: py,
+                                    tz: pz + perp_z * off,
+                                    heavy: false,
+                                    speed: BOSS_VOLLEY_SPEED,
+                                });
+                            }
+                        }
+                    }
+                }
+                mob.boss_cd = BOSS_VOLLEY_CD_S;
+                mob.boss_attack_idx = mob.boss_attack_idx.wrapping_add(1);
+                mob.move_state = MobMoveState::Pursuing;
+            }
+        }
+        MobMoveState::StompWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if let Some(pid) = mob.aggro {
+                    if let Some((px, _, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            let d = dist2_xz(mob.x, mob.z, px, pz).sqrt();
+                            if d <= BOSS_STOMP_RANGE + 0.18 {
+                                hits.push(MobPlayerHit {
+                                    player: pid,
+                                    damage: BOSS_STOMP_DAMAGE,
+                                    mob_x: mob.x,
+                                    mob_z: mob.z,
+                                });
+                            }
+                        }
+                    }
+                }
+                mob.boss_cd = BOSS_STOMP_CD_S;
+                mob.boss_attack_idx = mob.boss_attack_idx.wrapping_add(1);
                 mob.move_state = MobMoveState::Pursuing;
             }
         }
@@ -688,9 +771,26 @@ fn tick_boss_tank(
                 }
                 let _ = pid;
             }
-            if mob.boss_cd <= 0.0 && target.is_some() && mob.move_state != MobMoveState::ShootWindup {
-                mob.move_state = MobMoveState::ShootWindup;
-                mob.state_timer = BOSS_SHOOT_WINDUP_S;
+            if mob.boss_cd <= 0.0 && target.is_some() {
+                if let Some(pid) = target {
+                    if let Some((px, _, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            let dist = dist2_xz(mob.x, mob.z, px, pz).sqrt();
+                            let stomp_ok = dist <= BOSS_STOMP_RANGE
+                                && mob.boss_attack_idx.wrapping_rem(5) == 3;
+                            if stomp_ok {
+                                mob.move_state = MobMoveState::StompWindup;
+                                mob.state_timer = BOSS_STOMP_WINDUP_S;
+                            } else if mob.boss_attack_idx % 2 == 0 {
+                                mob.move_state = MobMoveState::ShootWindup;
+                                mob.state_timer = BOSS_SHOOT_WINDUP_S;
+                            } else {
+                                mob.move_state = MobMoveState::VolleyWindup;
+                                mob.state_timer = BOSS_VOLLEY_WINDUP_S;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -706,6 +806,7 @@ fn tick_boss_summoner(
     creep_pop: usize,
     next_id: u32,
     world_tick: u64,
+    pending_arrows: &mut Vec<BossArrowPlan>,
 ) -> Option<Mob> {
     let mut spawned: Option<Mob> = None;
     match mob.move_state {
@@ -719,6 +820,29 @@ fn tick_boss_summoner(
                     spawned = spawn_creep_minion(next_id, ox, oz, colliders);
                 }
                 mob.boss_cd = BOSS_SUMMON_CD_S;
+                mob.boss_attack_idx = mob.boss_attack_idx.wrapping_add(1);
+                mob.move_state = MobMoveState::Pursuing;
+            }
+        }
+        MobMoveState::BoltWindup => {
+            mob.state_timer -= dt;
+            if mob.state_timer <= 0.0 {
+                if let Some(pid) = mob.aggro {
+                    if let Some((px, py, pz)) = player_by_id(eligible, pid) {
+                        if !point_in_spawn_safe_zone(px, pz) {
+                            pending_arrows.push(BossArrowPlan {
+                                mob_id: mob.id,
+                                tx: px,
+                                ty: py,
+                                tz: pz,
+                                heavy: false,
+                                speed: BOSS_BOLT_SPEED,
+                            });
+                        }
+                    }
+                }
+                mob.boss_cd = BOSS_BOLT_CD_S;
+                mob.boss_attack_idx = mob.boss_attack_idx.wrapping_add(1);
                 mob.move_state = MobMoveState::Pursuing;
             }
         }
@@ -735,13 +859,15 @@ fn tick_boss_summoner(
                     }
                 }
             }
-            if mob.boss_cd <= 0.0
-                && target.is_some()
-                && creep_pop < MAX_MOBS
-                && mob.move_state != MobMoveState::SummonWindup
-            {
-                mob.move_state = MobMoveState::SummonWindup;
-                mob.state_timer = BOSS_SUMMON_WINDUP_S;
+            if mob.boss_cd <= 0.0 && target.is_some() {
+                let want_summon = mob.boss_attack_idx % 2 == 0;
+                if want_summon && creep_pop < MAX_MOBS {
+                    mob.move_state = MobMoveState::SummonWindup;
+                    mob.state_timer = BOSS_SUMMON_WINDUP_S;
+                } else {
+                    mob.move_state = MobMoveState::BoltWindup;
+                    mob.state_timer = BOSS_BOLT_WINDUP_S;
+                }
             }
         }
     }
