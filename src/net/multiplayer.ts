@@ -27,6 +27,9 @@ export class MultiplayerClient {
     z: number;
     yaw: number;
     pitch: number;
+    creative: boolean;
+    flying: boolean;
+    sprinting: boolean;
     weapon: string;
     blocking: boolean;
     bowCharge: number;
@@ -143,6 +146,9 @@ export class MultiplayerClient {
     z: number;
     yaw: number;
     pitch: number;
+    creative: boolean;
+    flying: boolean;
+    sprinting: boolean;
     weapon: string;
     blocking: boolean;
     bowCharge: number;
@@ -163,6 +169,9 @@ export class MultiplayerClient {
         z: p.z,
         yaw: p.yaw,
         pitch: p.pitch,
+        creative: p.creative,
+        flying: p.flying,
+        sprinting: p.sprinting,
         weapon: p.weapon,
         blocking: p.blocking,
         bowCharge: p.bowCharge,

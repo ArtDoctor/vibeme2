@@ -3,6 +3,7 @@
 use crate::world::{resolve_colliders, snap_to_ground, AabbCollider};
 
 const MOVE_SPEED: f64 = 7.5;
+const SPEED_BOOST_MULTIPLIER: f64 = 3.0;
 const MAX_VERTICAL_SPEED: f64 = 28.0;
 
 pub fn clamp_claimed_position(
@@ -10,11 +11,20 @@ pub fn clamp_claimed_position(
     claimed: (f64, f64, f64),
     dt_secs: f64,
     colliders: &[AabbCollider],
+    creative: bool,
+    flying: bool,
+    sprinting: bool,
 ) -> (f64, f64, f64) {
     let dt = dt_secs.clamp(0.0, 0.25);
     if dt <= 0.0 {
         return prev;
     }
+    let flying = creative && flying;
+    let speed_multiplier = if sprinting {
+        SPEED_BOOST_MULTIPLIER
+    } else {
+        1.0
+    };
 
     let mut x = claimed.0;
     let mut y = claimed.1;
@@ -23,7 +33,7 @@ pub fn clamp_claimed_position(
     let dx = x - prev.0;
     let dz = z - prev.2;
     let horiz = (dx * dx + dz * dz).sqrt();
-    let max_h = MOVE_SPEED * dt * 1.55;
+    let max_h = MOVE_SPEED * speed_multiplier * dt * 1.55;
     if horiz > max_h && horiz > 1e-9 {
         let s = max_h / horiz;
         x = prev.0 + dx * s;
@@ -31,13 +41,19 @@ pub fn clamp_claimed_position(
     }
 
     let dy = y - prev.1;
-    let max_v = MAX_VERTICAL_SPEED * dt;
+    let max_v = if flying {
+        MOVE_SPEED * speed_multiplier * dt * 1.55
+    } else {
+        MAX_VERTICAL_SPEED * dt
+    };
     if dy.abs() > max_v {
         y = prev.1 + dy.signum() * max_v;
     }
 
     resolve_colliders(&mut x, &mut y, &mut z, colliders);
-    snap_to_ground(&mut y, x, z);
+    if !flying {
+        snap_to_ground(&mut y, x, z);
+    }
     (x, y, z)
 }
 
@@ -50,7 +66,7 @@ mod tests {
     fn zero_dt_returns_prev() {
         let colliders = build_colliders();
         let prev = (1.0, 2.5, -3.0);
-        let out = clamp_claimed_position(prev, (99.0, 99.0, 99.0), 0.0, &colliders);
+        let out = clamp_claimed_position(prev, (99.0, 99.0, 99.0), 0.0, &colliders, false, false, false);
         assert!((out.0 - prev.0).abs() < 1e-9);
         assert!((out.1 - prev.1).abs() < 1e-9);
         assert!((out.2 - prev.2).abs() < 1e-9);
@@ -62,8 +78,34 @@ mod tests {
         let gy = sample_terrain_height(0.0, 0.0);
         let prev = (0.0, gy + EYE_HEIGHT, 0.0);
         let claimed = (0.02, prev.1, 0.02);
-        let out = clamp_claimed_position(prev, claimed, 0.05, &colliders);
+        let out =
+            clamp_claimed_position(prev, claimed, 0.05, &colliders, false, false, false);
         assert!((out.0 - claimed.0).abs() < 1.0);
         assert!((out.2 - claimed.2).abs() < 1.0);
+    }
+
+    #[test]
+    fn sprinting_allows_faster_horizontal_claims() {
+        let colliders = build_colliders();
+        let gy = sample_terrain_height(0.0, 0.0);
+        let prev = (0.0, gy + EYE_HEIGHT, 0.0);
+        let dt = 0.05;
+        let claimed = (MOVE_SPEED * SPEED_BOOST_MULTIPLIER * dt, prev.1, 0.0);
+        let walk = clamp_claimed_position(prev, claimed, dt, &colliders, false, false, false);
+        let sprint = clamp_claimed_position(prev, claimed, dt, &colliders, false, false, true);
+        assert!(sprint.0 > walk.0 + 0.1, "walk={} sprint={}", walk.0, sprint.0);
+    }
+
+    #[test]
+    fn flying_does_not_snap_back_to_ground() {
+        let colliders = build_colliders();
+        let gy = sample_terrain_height(0.0, 0.0);
+        let prev = (0.0, gy + EYE_HEIGHT, 0.0);
+        let claimed = (0.0, prev.1 + 0.04, 0.0);
+        let grounded =
+            clamp_claimed_position(prev, claimed, 0.05, &colliders, true, false, false);
+        let flying = clamp_claimed_position(prev, claimed, 0.05, &colliders, true, true, false);
+        assert!(grounded.1 <= gy + EYE_HEIGHT + 1e-9);
+        assert!(flying.1 > grounded.1 + 0.01, "grounded={} flying={}", grounded.1, flying.1);
     }
 }

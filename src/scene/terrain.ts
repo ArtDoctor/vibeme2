@@ -27,5 +27,5 @@ export function sampleTerrainHeight(x: number, z: number): number {
   return dunes + ripples;
 }
 
-export const TERRAIN_HALF_SIZE = 200;
-export const TERRAIN_SEGMENTS = 160;
+export const TERRAIN_HALF_SIZE = 600;
+export const TERRAIN_SEGMENTS = 320;

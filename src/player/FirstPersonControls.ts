@@ -6,6 +6,11 @@ import { EYE_HEIGHT, PLAYER_RADIUS } from "../game/constants";
 import type { DesertWorld } from "../scene/DesertScene";
 import type { PlayerState } from "./PlayerState";
 import { iterativelyResolvePlayerXz } from "./circleAabbXZ";
+import {
+  applyCreativeSpacePress,
+  createMovementModeState,
+  movementSpeedMultiplier,
+} from "./movementMode";
 
 export { EYE_HEIGHT };
 
@@ -74,7 +79,11 @@ export class FirstPersonControls {
   private keyBackward = false;
   private keyLeft = false;
   private keyRight = false;
+  private keyAscend = false;
+  private keyDescend = false;
+  private keySprint = false;
   private jumpRequested = false;
+  private movementMode = createMovementModeState();
 
   constructor(options: FirstPersonControlsOptions) {
     this.camera = options.camera;
@@ -109,31 +118,30 @@ export class FirstPersonControls {
 
   update(delta: number): void {
     if (!this.controls.isLocked) {
-      // Still apply gravity so the player settles even before locking.
-      this.applyGravityOnly(delta);
+      if (this.movementMode.creativeMode && this.movementMode.flyMode) {
+        this.velocity.set(0, 0, 0);
+        this.state.onGround = false;
+        this.syncStateVelocity();
+      } else {
+        // Still apply gravity so the player settles even before locking.
+        this.applyGravityOnly(delta);
+      }
       this.applyCameraView();
       this.updateSafeZoneHint();
       return;
     }
 
-    // ---- Build desired horizontal velocity from input ----
-    this.move.set(0, 0, 0);
-    if (this.keyForward) this.move.z -= 1;
-    if (this.keyBackward) this.move.z += 1;
-    if (this.keyLeft) this.move.x -= 1;
-    if (this.keyRight) this.move.x += 1;
-
-    if (this.move.lengthSq() > 0) {
-      this.move.normalize();
-      this.move.applyQuaternion(this.camera.quaternion);
-      this.move.y = 0;
-      if (this.move.lengthSq() > 1e-6) {
-        this.move.normalize();
-      }
+    if (this.movementMode.creativeMode && this.movementMode.flyMode) {
+      this.updateFlyMode(delta);
+      this.applyCameraView();
+      this.updateSafeZoneHint();
+      return;
     }
 
-    this.velocity.x = this.move.x * MOVE_SPEED;
-    this.velocity.z = this.move.z * MOVE_SPEED;
+    this.buildHorizontalMoveFromKeys();
+    const speedMultiplier = movementSpeedMultiplier(this.keySprint);
+    this.velocity.x = this.move.x * MOVE_SPEED * speedMultiplier;
+    this.velocity.z = this.move.z * MOVE_SPEED * speedMultiplier;
     this.velocity.y -= GRAVITY * delta;
 
     // ---- Integrate XZ, then resolve obstacle penetration ----
@@ -177,9 +185,7 @@ export class FirstPersonControls {
     // Step-up onto short obstacles we are walking into.
     this.applyStepUp(groundY);
 
-    this.state.velocity.x = this.velocity.x;
-    this.state.velocity.y = this.velocity.y;
-    this.state.velocity.z = this.velocity.z;
+    this.syncStateVelocity();
 
     this.applyCameraView();
     this.updateSafeZoneHint();
@@ -192,6 +198,9 @@ export class FirstPersonControls {
     z: number;
     yaw: number;
     pitch: number;
+    creative: boolean;
+    flying: boolean;
+    sprinting: boolean;
   } {
     const p = this.eyePosition;
     const r = this.camera.rotation;
@@ -202,6 +211,9 @@ export class FirstPersonControls {
       z: p.z,
       yaw: horizontalYawFromCamera(this.camera),
       pitch: r.x,
+      creative: this.movementMode.creativeMode,
+      flying: this.movementMode.creativeMode && this.movementMode.flyMode,
+      sprinting: this.keySprint,
     };
   }
 
@@ -241,6 +253,51 @@ export class FirstPersonControls {
     this.safeZoneHint.classList.toggle("hidden", !inside);
   }
 
+  private buildHorizontalMoveFromKeys(): void {
+    this.move.set(0, 0, 0);
+    if (this.keyForward) this.move.z -= 1;
+    if (this.keyBackward) this.move.z += 1;
+    if (this.keyLeft) this.move.x -= 1;
+    if (this.keyRight) this.move.x += 1;
+
+    if (this.move.lengthSq() > 0) {
+      this.move.normalize();
+      this.move.applyQuaternion(this.camera.quaternion);
+      this.move.y = 0;
+      if (this.move.lengthSq() > 1e-6) {
+        this.move.normalize();
+      }
+    }
+  }
+
+  private updateFlyMode(delta: number): void {
+    this.buildHorizontalMoveFromKeys();
+    const speed = MOVE_SPEED * movementSpeedMultiplier(this.keySprint);
+    this.velocity.x = this.move.x * speed;
+    this.velocity.z = this.move.z * speed;
+    this.velocity.y = 0;
+    if (this.keyAscend) this.velocity.y += speed;
+    if (this.keyDescend) this.velocity.y -= speed;
+
+    this.eyePosition.x += this.velocity.x * delta;
+    this.eyePosition.y += this.velocity.y * delta;
+    this.eyePosition.z += this.velocity.z * delta;
+
+    const collisionFeetY = this.eyePosition.y - EYE_HEIGHT;
+    const resolved = iterativelyResolvePlayerXz(
+      this.eyePosition.x,
+      this.eyePosition.z,
+      collisionFeetY,
+      this.world.colliders,
+      { playerRadius: PLAYER_RADIUS, worldHalfSize: this.world.worldHalfSize },
+    );
+    this.eyePosition.x = resolved.x;
+    this.eyePosition.z = resolved.z;
+
+    this.state.onGround = false;
+    this.syncStateVelocity();
+  }
+
   private applyGravityOnly(delta: number): void {
     this.velocity.x = 0;
     this.velocity.z = 0;
@@ -255,6 +312,7 @@ export class FirstPersonControls {
       this.velocity.y = 0;
       this.state.onGround = true;
     }
+    this.syncStateVelocity();
   }
 
   /**
@@ -269,6 +327,12 @@ export class FirstPersonControls {
       if (this.velocity.y < 0) this.velocity.y = 0;
       this.state.onGround = true;
     }
+  }
+
+  private syncStateVelocity(): void {
+    this.state.velocity.x = this.velocity.x;
+    this.state.velocity.y = this.velocity.y;
+    this.state.velocity.z = this.velocity.z;
   }
 
   // ---- DOM event handlers (arrow methods so they bind & dispose cleanly) --
@@ -308,7 +372,39 @@ export class FirstPersonControls {
       case "Space":
         if (this.controls.isLocked) {
           e.preventDefault();
-          this.jumpRequested = true;
+          this.keyAscend = true;
+          if (!e.repeat) {
+            const nextMode = applyCreativeSpacePress(
+              this.movementMode,
+              performance.now(),
+            );
+            if (!this.movementMode.flyMode && nextMode.flyMode) {
+              this.velocity.y = 0;
+              this.jumpRequested = false;
+            }
+            this.movementMode = nextMode;
+          }
+          if (!this.movementMode.flyMode) {
+            this.jumpRequested = true;
+          }
+        }
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        this.keyDescend = true;
+        break;
+      case "ControlLeft":
+      case "ControlRight":
+        this.keySprint = true;
+        break;
+      case "KeyL":
+        if (!e.repeat && this.controls.isLocked) {
+          e.preventDefault();
+          this.movementMode = this.movementMode.creativeMode
+            ? createMovementModeState()
+            : { ...createMovementModeState(), creativeMode: true };
+          this.velocity.y = 0;
+          this.jumpRequested = false;
         }
         break;
       case "KeyR":
@@ -339,6 +435,17 @@ export class FirstPersonControls {
       case "KeyD":
       case "ArrowRight":
         this.keyRight = false;
+        break;
+      case "Space":
+        this.keyAscend = false;
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        this.keyDescend = false;
+        break;
+      case "ControlLeft":
+      case "ControlRight":
+        this.keySprint = false;
         break;
       default:
         break;

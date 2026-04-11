@@ -63,6 +63,11 @@ const MOUNTAIN_COLOR = 0x7a5a36;
 const ROCK_COLOR = 0x9a7a4a;
 const CASTLE_STONE_COLOR = 0x8a8780;
 const SKY_COLOR = 0xf6c98a;
+const FOG_NEAR = 120;
+const FOG_FAR = 650;
+const MOUNTAIN_COUNT = 36;
+const SMALL_MOUNTAIN_COUNT = 72;
+const ROCK_COUNT = 140;
 
 /**
  * Builds the desert: terrain mesh, sky/fog, lighting, scattered mountains/rocks.
@@ -70,7 +75,7 @@ const SKY_COLOR = 0xf6c98a;
  */
 export function buildDesertScene(scene: Scene): DesertWorld {
   scene.background = new Color(SKY_COLOR);
-  scene.fog = new Fog(SKY_COLOR, 60, 220);
+  scene.fog = new Fog(SKY_COLOR, FOG_NEAR, FOG_FAR);
 
   // ---- Lighting -----------------------------------------------------------
   const sun = new DirectionalLight(0xfff1c4, 1.05);
@@ -113,7 +118,6 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   // an AABB collider.
   const colliders: AABBCollider[] = [];
 
-  const MOUNTAIN_COUNT = 14;
   for (let i = 0; i < MOUNTAIN_COUNT; i += 1) {
     const r = 60 + hash2(i, 11) * (TERRAIN_HALF_SIZE - 80);
     const a = hash2(i, 23) * Math.PI * 2;
@@ -139,7 +143,6 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     });
   }
 
-  const SMALL_MOUNTAIN_COUNT = 22;
   for (let i = 0; i < SMALL_MOUNTAIN_COUNT; i += 1) {
     const x = (hash2(i, 71) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
     const z = (hash2(i, 83) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
@@ -164,7 +167,6 @@ export function buildDesertScene(scene: Scene): DesertWorld {
     });
   }
 
-  const ROCK_COUNT = 40;
   for (let i = 0; i < ROCK_COUNT; i += 1) {
     const x = (hash2(i, 5) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
     const z = (hash2(i, 7) - 0.5) * TERRAIN_HALF_SIZE * 1.7;

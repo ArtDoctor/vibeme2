@@ -18,8 +18,10 @@ pub const MOB_SPEED: f64 = 3.6;
 pub const MOB_DAMAGE: f64 = 7.0;
 pub const MOB_HIT_RANGE: f64 = 0.88;
 pub const MOB_HIT_COOLDOWN_S: f64 = 0.85;
-pub const MAX_MOBS: usize = 14;
-pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 2.2;
+// The world is much larger now, so keep creep density high enough that players
+// still encounter enemies within the per-view snapshot radius.
+pub const MAX_MOBS: usize = 160;
+pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.5;
 
 /// Matches `SPAWN_SAFE_ZONE_AABB` in `src/world/spawnSafeZone.ts`.
 const SAFE_MIN_X: f64 = -5.0;
@@ -166,11 +168,7 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
     None
 }
 
-fn nearest_target(
-    mx: f64,
-    mz: f64,
-    players: &[(Uuid, f64, f64, f64)],
-) -> Option<(f64, f64)> {
+fn nearest_target(mx: f64, mz: f64, players: &[(Uuid, f64, f64, f64)]) -> Option<(f64, f64)> {
     let mut best: Option<(f64, f64, f64)> = None;
     for &(_, px, _, pz) in players {
         let dx = px - mx;

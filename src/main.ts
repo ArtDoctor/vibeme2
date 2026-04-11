@@ -1,5 +1,9 @@
 import { Game } from "./game/Game";
-import { MultiplayerClient, readStoredSession } from "./net/multiplayer";
+import {
+  clearStoredSession,
+  MultiplayerClient,
+  readStoredSession,
+} from "./net/multiplayer";
 
 const canvasEl = document.getElementById("game-canvas");
 if (!(canvasEl instanceof HTMLCanvasElement)) {
@@ -17,7 +21,7 @@ const joinNickname = document.getElementById("join-nickname");
 const joinSubmit = document.getElementById("join-submit");
 const joinError = document.getElementById("join-error");
 const deathPanel = document.getElementById("death-panel");
-const deathContinue = document.getElementById("death-continue");
+const deathRevive = document.getElementById("death-revive");
 const deathMenu = document.getElementById("death-menu");
 
 let game: Game | undefined;
@@ -55,7 +59,21 @@ function hideDeathPanel(): void {
   deathPanel?.classList.add("hidden");
 }
 
-async function startMultiplayer(): Promise<void> {
+function setDeathActionsDisabled(disabled: boolean): void {
+  if (deathRevive instanceof HTMLButtonElement) {
+    deathRevive.disabled = disabled;
+  }
+  if (deathMenu instanceof HTMLButtonElement) {
+    deathMenu.disabled = disabled;
+  }
+}
+
+function disposeGame(): void {
+  game?.dispose();
+  game = undefined;
+}
+
+async function startMultiplayer(options?: { freshSession?: boolean }): Promise<void> {
   if (!(joinNickname instanceof HTMLInputElement)) return;
   const nickname = joinNickname.value.trim();
   if (!nickname) {
@@ -66,9 +84,11 @@ async function startMultiplayer(): Promise<void> {
   if (joinSubmit instanceof HTMLButtonElement) {
     joinSubmit.disabled = true;
   }
+  setDeathActionsDisabled(true);
 
-  const stored = readStoredSession();
+  const stored = options?.freshSession ? null : readStoredSession();
   try {
+    disposeGame();
     const mp = await MultiplayerClient.connect(
       { nickname, session: stored },
       (snap, localPlayerId) => {
@@ -88,14 +108,17 @@ async function startMultiplayer(): Promise<void> {
     });
     game.attachMultiplayer(mp);
     hideJoinPanel();
+    hideDeathPanel();
     game.start();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    showJoinPanel();
     showJoinError(msg);
   } finally {
     if (joinSubmit instanceof HTMLButtonElement) {
       joinSubmit.disabled = false;
     }
+    setDeathActionsDisabled(false);
   }
 }
 
@@ -113,17 +136,18 @@ if (joinNickname instanceof HTMLInputElement) {
   });
 }
 
-if (deathContinue instanceof HTMLButtonElement) {
-  deathContinue.addEventListener("click", () => {
-    hideDeathPanel();
+if (deathRevive instanceof HTMLButtonElement) {
+  deathRevive.addEventListener("click", () => {
+    clearStoredSession();
+    void startMultiplayer({ freshSession: true });
   });
 }
 
 if (deathMenu instanceof HTMLButtonElement) {
   deathMenu.addEventListener("click", () => {
     hideDeathPanel();
-    game?.dispose();
-    game = undefined;
+    clearStoredSession();
+    disposeGame();
     showJoinPanel();
   });
 }
@@ -131,7 +155,6 @@ if (deathMenu instanceof HTMLButtonElement) {
 // Vite HMR cleanup so dev reloads don't stack up listeners + WebGL contexts.
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    game?.dispose();
-    game = undefined;
+    disposeGame();
   });
 }

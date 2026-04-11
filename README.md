@@ -20,7 +20,8 @@ npm run smoke:ci     # test + build + vite preview + GET / smoke test
 npm run server       # cargo run — serves dist/ + WebSocket (after npm run build)
 ```
 
-Rust tests: `cargo test --manifest-path server/Cargo.toml`
+Rust tests: `cargo test --manifest-path server/Cargo.toml` (includes headless
+authoritative simulation scenarios in `server/src/sim.rs`)
 
 Click the canvas to lock the mouse. **WASD** to move, **Space** to jump,
 **Esc** to release the mouse.

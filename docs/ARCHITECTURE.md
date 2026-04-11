@@ -19,7 +19,8 @@ src/
                                 render mesh AND the player ground sampler so they
                                 cannot drift out of sync.
   player/
-    FirstPersonControls.ts      Input + kinematic movement; uses `circleAabbXZ`.
+    FirstPersonControls.ts      Input + kinematic movement (walk/sprint/jump plus
+                                creative fly mode); uses `circleAabbXZ`.
     circleAabbXZ.ts             Pure circle-vs-AABB XZ resolution (tested). Server
                                 mirrors the same math in `server/src/world.rs`.
     CombatInput.ts              Local weapon/block/bow intents; outbound fields are
@@ -39,6 +40,19 @@ Authoritative combat (melee, arrows, HP/stamina, death/respawn) lives in
 `server/src/combat.rs` and is driven by extra fields on the same `input`
 messages plus the 20 Hz tick loop.
 
+```
+server/src/
+  main.rs                       Thin transport entry. Axum routes, WebSocket session flow,
+                                snapshot broadcast loop, and no gameplay rules.
+  protocol.rs                   JSON wire types for join/input/welcome/joinError.
+  sim.rs                        Authoritative simulation state, input application, world tick,
+                                snapshot building, and headless scenario tests.
+  combat.rs                     Pure-ish combat math and projectile helpers.
+  mobs.rs                       Mob AI/state updates and spawn rules.
+  validate.rs                   Authoritative movement clamp against terrain + colliders.
+  world.rs                      Shared terrain/collider source of truth for the server.
+```
+
 ### Why this split
 
 The instruction was: don't put collision rules and level geometry in the same
@@ -54,6 +68,11 @@ a `DesertWorld` interface (`sampleGroundHeight`, `colliders`, `spawn`,
 
 New systems (mobs, networking, UI overlays) follow the same shape: a builder
 function that returns an interface, and a register call from `Game.ts`.
+
+On the server, the equivalent rule is: `main.rs` is transport only, while
+`sim.rs` owns authoritative world state. That makes world behavior testable
+without sockets and keeps future work like economy, inventory, or boss logic
+out of the WebSocket loop.
 
 ## Deployment (planned)
 
@@ -116,6 +135,13 @@ Boxes that should act like ceilings are not supported yet.
 - ❌ **Fast teleports can skip through.** Normal walk speed is fine; a future
 dash/blink ability needs a swept test or server reconciliation.
 
+Creative fly mode still reuses the same XZ/world-bounds clamp at the player's
+current height, but it skips ground snap while flying.
+
+- ✅ Lets the player rise over walls/rocks without introducing a second collision system.
+- ❌ **No ceiling or full 3D collider support.** While flying we still only resolve
+  horizontal overlap; this is not noclip through real 3D geometry.
+
 ### Server reconciliation (future)
 
 For multiplayer, the client will keep doing exactly this — predicted movement
@@ -123,6 +149,31 @@ with the same heightfield + AABB resolver. The **server** will run the same
 code with the same world data and reject positions that drift past a tolerance.
 Because the heightfield is a pure function and colliders are static, both
 sides agree by construction. See `docs/TASKS.md` → Multiplayer.
+
+## Simulation testing
+
+The Rust server now has a headless simulation seam in `server/src/sim.rs`.
+
+- `Simulation::new(SimConfig)` can boot either the normal live world or an
+  intentionally empty test world.
+- `Simulation::apply_input(...)` consumes one player's claimed pose/combat
+  intent without needing a socket in the test itself.
+- `Simulation::tick(...)` advances the authoritative world deterministically
+  enough for scenario tests.
+- `Simulation::build_snapshot(...)` drains one-tick visual events and returns
+  the same broadcast shape used by the live server.
+
+Current limits:
+
+- Tests still run inside one process and one world; there is no persistence or
+  multi-shard coverage yet.
+- Snapshot fan-out is now **per-client filtered by simple XZ distance** before
+  sending. The current implementation builds a per-tick spatial grid so each
+  client queries nearby cells instead of scanning every entity linearly.
+- This reduces bandwidth and per-client snapshot work, but it is still not
+  occlusion culling, cross-server sharding, or delta compression.
+- The simulation is deterministic for logic, but not yet captured as replayable
+  external fixtures or golden recordings.
 
 ## Lifecycle
 

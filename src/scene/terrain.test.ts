@@ -13,6 +13,6 @@ describe("sampleTerrainHeight", () => {
   });
 
   it("exports world half-size constant", () => {
-    expect(TERRAIN_HALF_SIZE).toBe(200);
+    expect(TERRAIN_HALF_SIZE).toBe(600);
   });
 });

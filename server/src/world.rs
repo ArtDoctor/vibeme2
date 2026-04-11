@@ -1,7 +1,7 @@
 //! Deterministic world data shared with the TypeScript client (`scene/terrain.ts`,
 //! `scene/DesertScene.ts`). Colliders must stay in sync — see `docs/ARCHITECTURE.md`.
 
-pub const TERRAIN_HALF_SIZE: f64 = 200.0;
+pub const TERRAIN_HALF_SIZE: f64 = 600.0;
 pub const EYE_HEIGHT: f64 = 1.65;
 pub const PLAYER_RADIUS: f64 = 0.35;
 pub const MAX_STEP_UP: f64 = 0.6;
@@ -40,7 +40,7 @@ pub fn sample_terrain_height(x: f64, z: f64) -> f64 {
 pub fn build_colliders() -> Vec<AabbCollider> {
     let mut colliders: Vec<AabbCollider> = Vec::new();
 
-    const MOUNTAIN_COUNT: i32 = 14;
+    const MOUNTAIN_COUNT: i32 = 36;
     for i in 0..MOUNTAIN_COUNT {
         let i_f = f64::from(i);
         let r = 60.0 + hash2(i_f, 11.0) * (TERRAIN_HALF_SIZE - 80.0);
@@ -59,7 +59,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         });
     }
 
-    const SMALL_MOUNTAIN_COUNT: i32 = 22;
+    const SMALL_MOUNTAIN_COUNT: i32 = 72;
     for i in 0..SMALL_MOUNTAIN_COUNT {
         let i_f = f64::from(i);
         let x = (hash2(i_f, 71.0) - 0.5) * (TERRAIN_HALF_SIZE * 1.6);
@@ -79,7 +79,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
         });
     }
 
-    const ROCK_COUNT: i32 = 40;
+    const ROCK_COUNT: i32 = 140;
     for i in 0..ROCK_COUNT {
         let i_f = f64::from(i);
         let x = (hash2(i_f, 5.0) - 0.5) * TERRAIN_HALF_SIZE * 1.7;
@@ -259,7 +259,10 @@ mod tests {
     #[test]
     fn terrain_origin_matches_ts_reference() {
         let y = sample_terrain_height(0.0, 0.0);
-        assert!((y - 0.09).abs() < 1e-9, "keep in sync with src/scene/terrain.test.ts");
+        assert!(
+            (y - 0.09).abs() < 1e-9,
+            "keep in sync with src/scene/terrain.test.ts"
+        );
     }
 
     #[test]
@@ -271,6 +274,6 @@ mod tests {
 
     #[test]
     fn colliders_non_empty() {
-        assert!(build_colliders().len() > 70);
+        assert!(build_colliders().len() > 220);
     }
 }

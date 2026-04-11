@@ -14,7 +14,8 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
 - [x] Desert scene module: sand-colored ground, hemisphere + directional light,
       sky/fog, scattered cone "mountains" (big and small), cube rocks.
 - [x] Analytic heightfield (`scene/terrain.ts`) shared by render mesh and player.
-- [x] First-person controls module: WASD + mouselook + jump + gravity.
+- [x] First-person controls module: WASD + mouselook + jump + gravity, plus
+      sprint (`Ctrl`) and creative fly mode (`L`, double-tap `Space`, `Shift` descend).
 - [x] AABB collision against mountains/rocks with circle-vs-box separation.
 - [x] Stable resize (no NaN aspect, no canvas crash on minimise).
 - [x] `npm run smoke:ci` — production build + HTTP smoke test.
@@ -151,7 +152,9 @@ runs; server is authoritative; client keeps only a session token in
 ## Milestone 7 — Polish and content
 
 - [ ] Replace cone mountains with low-poly mesh imports (still simple).
-- [ ] Bigger world, multiple biomes (still desert-themed for v1).
+- [~] Bigger world, multiple biomes (still desert-themed for v1).
+      Current state: the desert bounds are now 3x larger in each direction with
+      more procedural mountains and rocks; biome/content variety is still todo.
 - [ ] **Safe zones vs chaos zones**: divide the map so **safe zones** are a
       minority of the area (spawn castle and any future havens). The **chaos
       zones** — everywhere else — pack heavy mob and boss presence. Survival
@@ -174,13 +177,24 @@ runs; server is authoritative; client keeps only a session token in
 
 - [ ] **Versions**: automatic version bump on push/build/CI if feasible; **minimum** a
       simple version file in the repo root that release/deploy must not forget to update.
-- [ ] **More automated testing**: expand coverage; **rigorous server-side tests** that
+- [~] **More automated testing**: expand coverage; **rigorous server-side tests** that
       exercise the simulated world (e.g. track object coordinates and state across ticks)
       so regressions in authority/simulation are caught early.
-- [ ] **LLM-assisted refactor pass**: use a large model for code review with focus on
+- [~] **LLM-assisted refactor pass**: use a large model for code review with focus on
       scalability and maintainability (e.g. component system ideas); **capture the main
       architectural decisions and patterns in `docs/`** so future humans and LLMs follow
       the same structure.
+- [x] **Extract authoritative simulation core**: move world state, combat resolution,
+      mob updates, and snapshot building out of `server/src/main.rs` into a reusable
+      simulation module so transport and gameplay can evolve independently.
+- [x] **Headless scenario tests**: add Rust tests that boot an empty world, spawn
+      players/mobs explicitly, run ticks, and print per-tick traces on failure for
+      fast debugging of AI/combat regressions.
+- [~] **Snapshot scaling**: replace broadcast-all snapshots with interest management
+      or smaller per-client views before the world/player count grows much further.
+      Current state: per-client views use a per-tick spatial grid plus distance
+      filtering, so snapshot fan-out no longer scans every entity list linearly.
+      True region ownership, more advanced interest rules, and compression are still todo.
 
 ---
 
