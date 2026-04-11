@@ -1,9 +1,22 @@
 ---
-description: Read docs before changes; run full test suite after code changes
+description: Read docs before changes; run full test suite after code changes; sync feature work with docs/TASKS.md
 alwaysApply: true
 ---
 
 # Documentation and testing
+
+## Task list for feature-scale work
+
+When the user asks for work that is **not** a minor fix or small change — for example a new capability, user-visible behavior, or anything that reads as a **feature** rather than a tiny tweak, typo fix, or obvious one-off correction:
+
+1. Open **`docs/TASKS.md`** (the project task list).
+2. If the request is **not** already represented there, add a new unchecked item `[ ]` (match the file’s milestone structure and legend).
+3. Implement the work.
+4. When implementation is complete **and** the full test suite passes (see below), mark that item **`[x]`**.
+
+If the item **was** already in `docs/TASKS.md`, mark it **`[x]`** after you finish and tests pass.
+
+Purely minor fixes do not require adding or updating `docs/TASKS.md` unless the user explicitly wants it tracked.
 
 ## Read documentation first
 

@@ -296,3 +296,26 @@ pub fn equipment_armor_multiplier(armor: ArmorSlots) -> f64 {
     }
     damage.clamp(0.45, 1.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sell_prices_match_client_shop_sell_offers() {
+        assert_eq!(sell_price_gold(InventoryItemKind::IronSword), 16);
+        assert_eq!(sell_price_gold(InventoryItemKind::SteelSword), 38);
+        assert_eq!(sell_price_gold(InventoryItemKind::VanguardSword), 72);
+        assert_eq!(sell_price_gold(InventoryItemKind::GearUpgradeToken), 35);
+        assert_eq!(sell_price_gold(InventoryItemKind::WoodenSword), 0);
+    }
+
+    #[test]
+    fn inventory_kind_from_client_round_trips() {
+        assert_eq!(
+            inventory_item_kind_from_client("ironSword"),
+            Some(InventoryItemKind::IronSword)
+        );
+        assert_eq!(inventory_item_kind_from_client("bad"), None);
+    }
+}

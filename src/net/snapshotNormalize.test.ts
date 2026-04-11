@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeMainHandKind,
+  normalizePlayerTeam,
   normalizeSnapshotMob,
   normalizeSnapshotMsg,
   normalizeSnapshotPickup,
@@ -8,6 +9,20 @@ import {
   normalizeWeaponKind,
 } from "./snapshotNormalize";
 import { BOSS_TANK_HP, MOB_HP } from "../combat/constants";
+
+describe("normalizePlayerTeam", () => {
+  it("accepts red, blue, neutral", () => {
+    expect(normalizePlayerTeam("red")).toBe("red");
+    expect(normalizePlayerTeam("blue")).toBe("blue");
+    expect(normalizePlayerTeam("neutral")).toBe("neutral");
+  });
+
+  it("defaults invalid values to neutral", () => {
+    expect(normalizePlayerTeam(undefined)).toBe("neutral");
+    expect(normalizePlayerTeam("")).toBe("neutral");
+    expect(normalizePlayerTeam("Red")).toBe("neutral");
+  });
+});
 
 describe("normalizeWeaponKind", () => {
   it("defaults unknown to sword", () => {

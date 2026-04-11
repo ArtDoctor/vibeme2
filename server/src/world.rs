@@ -49,6 +49,25 @@ pub fn safe_zone_index_at(x: f64, z: f64) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
+/// Shortest distance from `(x,z)` to any spawn safe AABB edge. `0` when inside a courtyard
+/// (including boundary); positive in open **chaos** desert — used to bias passive creep spawns
+/// away from castles (Milestone 7).
+#[inline]
+pub fn min_distance_to_any_spawn_safe_aabb(x: f64, z: f64) -> f64 {
+    let mut best = f64::MAX;
+    for &(min_x, max_x, min_z, max_z) in SPAWN_SAFE_ZONES.iter() {
+        let cx = x.clamp(min_x, max_x);
+        let cz = z.clamp(min_z, max_z);
+        let dx = x - cx;
+        let dz = z - cz;
+        let d = (dx * dx + dz * dz).sqrt();
+        if d < best {
+            best = d;
+        }
+    }
+    best
+}
+
 /// Red/blue home courtyards — PvP allowed between enemies here (not a mixed-team truce yard).
 #[inline]
 pub fn is_team_war_camp_zone_index(idx: usize) -> bool {
@@ -541,6 +560,29 @@ mod tests {
     }
 
     #[test]
+    fn chaos_zones_cover_most_of_the_map() {
+        let map_area = (2.0 * TERRAIN_HALF_SIZE).powi(2);
+        let w = 2.0 * SPAWN_SAFE_ZONE_HALF;
+        let safe_area = w * w * (SPAWN_SAFE_ZONES.len() as f64);
+        let ratio = safe_area / map_area;
+        assert!(
+            ratio < 0.002,
+            "safe courtyards should be a small fraction of the world (got {ratio})"
+        );
+    }
+
+    #[test]
+    fn min_distance_zero_inside_safe_zone() {
+        assert!(min_distance_to_any_spawn_safe_aabb(0.0, 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn min_distance_positive_deep_in_chaos() {
+        let d = min_distance_to_any_spawn_safe_aabb(120.0, -220.0);
+        assert!(d > 30.0, "expected far from any courtyard, got {d}");
+    }
+
+    #[test]
     fn extrude_pushes_red_out_of_blue_disk() {
         let (cx, cz) = blue_war_camp_center_xz();
         let mut x = cx;
@@ -553,5 +595,20 @@ mod tests {
             (d - ENEMY_WAR_CAMP_EXCLUSION_RADIUS).abs() < 1e-6,
             "expected on boundary, got d={d}"
         );
+    }
+
+    #[test]
+    fn safe_zone_shop_spot_center_stall_matches_ts_offset() {
+        let (x, z) = safe_zone_shop_spot_xz(0).expect("index 0");
+        assert!(x.abs() < 1e-9);
+        assert!((z - 1.85).abs() < 1e-9, "z={z}");
+    }
+
+    #[test]
+    fn safe_zone_shop_spot_each_index_is_some() {
+        for i in 0..SPAWN_SAFE_ZONES.len() {
+            assert!(safe_zone_shop_spot_xz(i).is_some(), "index {i}");
+        }
+        assert!(safe_zone_shop_spot_xz(99).is_none());
     }
 }

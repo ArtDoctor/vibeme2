@@ -150,7 +150,7 @@ runs; server is authoritative; client keeps only a session token in
 - [x] **Nickname labels above players**: canvas-texture sprites above remote
       box avatars. Own avatar hidden (first-person). Team tint on remote torso
       (Milestone 5).
-- [ ] **Money leaderboard (top-right HUD)**: persistent panel listing the
+- [x] **Money leaderboard (top-right HUD)**: persistent panel listing the
       top N players by gold, updated from server broadcasts. Shows nickname,
       team color dot, gold amount. Visible to everyone. Server is the only
       source — client never computes ranks locally.
@@ -175,12 +175,13 @@ runs; server is authoritative; client keeps only a session token in
       Desert bounds are 3× in each direction; **three horizontal strips along Z**:
       south **winter** (blue team / south war camp), center **sand**, north **forest**
       (red team) with procedural trees — see `src/world/biomes.ts` + `DesertScene.ts`.
-- [ ] **Safe zones vs chaos zones**: divide the map so **safe zones** are a
-      minority of the area (spawn castles). The **chaos
-      zones** — everywhere else — pack heavy mob and boss presence. Survival
-      there should push players to **move fast** or **group up**; solo slow
-      play in the open should be punishing. Server rules for aggro, spawn
-      density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs. Make the mobs by default follow the player, but if the players are in safe zone, mobs should keep distances from safe zones.
+- [x] **Safe zones vs chaos zones**: **safe** = eight spawn-courtyard AABBs
+      (`SPAWN_SAFE_ZONES` / `spawnSafeZone.ts`); **chaos** = the rest of the
+      desert (vast majority of map area — see `chaos_zones_cover_most_of_the_map` / Vitest safe-area ratio).
+      Passive creeps spawn only in chaos, biased **away** from castles via
+      clearance scoring (`min_distance_to_any_spawn_safe_aabb` in `mobs.rs`); bosses
+      stay in fixed arenas. Aggro ignores players in safe zones; creeps stop
+      chasing at the boundary; mob physics **extrudes** circles out of safe AABBs.
 - [x] **Juice and feedback**: view bob (FP walk), damage camera shake, hurt vignette,
       weapon-bar flash on loadout change, incoming damage numbers when hit (PvP floats);
       **death**: freeze pose, forced third-person, prone body on terrain, extra pull + FOV

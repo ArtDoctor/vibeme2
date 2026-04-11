@@ -31,3 +31,27 @@ pub fn team_from_join_str(raw: &str) -> Option<Team> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_parses_lowercase() {
+        assert_eq!(team_from_join_str("red"), Some(Team::Red));
+        assert_eq!(team_from_join_str("blue"), Some(Team::Blue));
+        assert_eq!(team_from_join_str("neutral"), Some(Team::Neutral));
+    }
+
+    #[test]
+    fn join_is_case_insensitive_and_trims() {
+        assert_eq!(team_from_join_str("  RED "), Some(Team::Red));
+        assert_eq!(team_from_join_str("Blue\n"), Some(Team::Blue));
+    }
+
+    #[test]
+    fn join_rejects_unknown() {
+        assert_eq!(team_from_join_str(""), None);
+        assert_eq!(team_from_join_str("green"), None);
+    }
+}

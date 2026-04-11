@@ -1,4 +1,6 @@
 //! Mobs: Milestone 3 AI — idle / chase / telegraphed attack, aggro + chained pull, safe-zone rules.
+//! Milestone 7 **chaos** desert: passive creeps spawn away from castle courtyards; physics extrudes
+//! mobs so they never sit inside safe AABBs; players in a safe zone are ignored for aggro/chase.
 //! Bosses: tank (heavy shot, spread volley, melee stomp), summoner (summon adds + soul bolts).
 //! Authoritative HP lives here + `sim`.
 
@@ -6,8 +8,9 @@ use uuid::Uuid;
 
 use crate::combat::{arrow_hits_vertical_cylinder, point_in_spawn_safe_zone, BOSS_ARROW_SPEED};
 use crate::world::{
-    hash2, resolve_colliders_entity, sample_terrain_height, snap_to_ground_with_eye, AabbCollider,
-    BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z, SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
+    hash2, min_distance_to_any_spawn_safe_aabb, resolve_colliders_entity, sample_terrain_height,
+    snap_to_ground_with_eye, AabbCollider, BOSS_SUMMONER_X, BOSS_SUMMONER_Z, BOSS_TANK_X, BOSS_TANK_Z,
+    SPAWN_SAFE_ZONES, TERRAIN_HALF_SIZE,
 };
 
 pub const MOB_RADIUS: f64 = 0.28;
@@ -63,7 +66,9 @@ pub const ENGAGEMENT_TTL_S: f64 = 4.0;
 /// Max creeps on the map at once (bosses + training dummy are not counted).
 pub const MAX_MOBS: usize = 512;
 /// Passive creep spawns: lower = fills toward [`MAX_MOBS`] faster.
-pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.09;
+pub const SPAWN_ATTEMPT_INTERVAL_S: f64 = 0.075;
+/// Random trials per spawn tick; best trial (deepest **chaos** clearance) wins (Milestone 7).
+const CHAOS_SPAWN_TRIALS: u32 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MobKind {
@@ -302,7 +307,9 @@ fn spawn_position_valid(x: f64, z: f64) -> bool {
 }
 
 fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option<Mob> {
-    for k in 0..32_u32 {
+    let mut best: Option<Mob> = None;
+    let mut best_clear = -1.0_f64;
+    for k in 0..CHAOS_SPAWN_TRIALS {
         let s = world_tick
             .wrapping_mul(1_103_515_245)
             .wrapping_add(u64::from(k).wrapping_mul(12_345))
@@ -346,10 +353,14 @@ fn try_spawn_mob(id: u32, world_tick: u64, colliders: &[AabbCollider]) -> Option
         extrude_mob_from_spawn_safe_zone(&mut m.x, &mut m.z);
         m.sync_y_from_terrain();
         if spawn_position_valid(m.x, m.z) {
-            return Some(m);
+            let c = min_distance_to_any_spawn_safe_aabb(m.x, m.z);
+            if c > best_clear {
+                best_clear = c;
+                best = Some(m);
+            }
         }
     }
-    None
+    best
 }
 
 fn dist2_xz(ax: f64, az: f64, bx: f64, bz: f64) -> f64 {
@@ -920,6 +931,8 @@ pub fn loot_for_death(kind: MobKind, id: u32, salt: u64) -> Option<(u32, bool)> 
 mod tests {
     use uuid::Uuid;
 
+    use crate::world::min_distance_to_any_spawn_safe_aabb;
+
     use super::*;
 
     #[test]
@@ -973,6 +986,17 @@ mod tests {
         assert_eq!(
             pick_aggro_target(0.0, 0.0, MobKind::Creep, &players, &[]),
             Some(a)
+        );
+    }
+
+    #[test]
+    fn extrude_keeps_mob_clear_of_safe_zone_aabbs() {
+        let mut x = 0.0_f64;
+        let mut z = 0.0_f64;
+        extrude_mob_from_spawn_safe_zone(&mut x, &mut z);
+        assert!(
+            min_distance_to_any_spawn_safe_aabb(x, z) + 1e-6 >= MOB_RADIUS,
+            "mob disk should not overlap courtyard interior"
         );
     }
 }
