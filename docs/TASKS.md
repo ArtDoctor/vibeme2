@@ -49,11 +49,22 @@ Legend: `[x] done` · `[~] in progress` · `[ ] todo`
       box. Charge-up + release. Spawns a small box "arrow" projectile.
 - [x] Player HP, stamina, hitbox (capsule approximated as cylinder for now).
 - [x] Death = full reset to spawn, drop everything, lose all gold and gear.
+- [ ] **Shield as off-hand with one-handed sword**: equip both at once (second-hand
+      shield while swinging sword), not either/or only.
+- [ ] **Starter loadout at base**: by default players can pick up / spawn with only a
+      **wooden sword**; shields, bows, better weapons, and armor come from map loot,
+      mobs, shops, and other progression (see Milestone 4).
+- [ ] **Armor**: equip slots, stat effects, and **appearance/skin** changes per piece or set.
+- [ ] **Weapon durability** (optional): weapons wear with use; balance with economy if added.
 
 ## Milestone 3 — Mobs
 
 Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / dead`.
 
+- [ ] **Telegraphed melee attacks**: mobs close to melee range, play a wind-up
+      (e.g. jump animation), then deal damage on a timed beat. If the player blocks
+      or moves away in time, no hit. Replace the current feel of mobs walking into
+      the player and dealing sloppy contact damage.
 - [x] **Training dummy** in spawn (server `MobKind::TrainingDummy`): stationary,
       high HP pool that resets when depleted; melee and bow can damage it from
       the safe zone. Client: HP bar + floating damage numbers for local hits.
@@ -83,8 +94,12 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
 
 - [ ] **Shops** scattered around the map. Each shop = one box building +
       one NPC box. Interact key opens a tiny inventory UI.
-- [ ] **Tiered gear**: starter (free pickups in the world), basic (cheap
-      shop), good (expensive shop), boss-locked (only after killing a boss).
+- [ ] **Full inventory system**: carry multiple weapons and items, loot gear from
+      dead players, sell surplus, and choose loadouts or sets when swapping (ties
+      into shop UI and Milestone 2 loadout rules).
+- [ ] **Tiered gear**: starter (wooden sword / base rules in Milestone 2), basic (cheap
+      shop), good (expensive shop), boss-locked (only after killing a boss); shields,
+      bows, better melee, and armor distributed across loot and shops.
 - [ ] **Gold** is the only currency. Server-authoritative balance.
 - [ ] **Permadeath**: on death, server wipes the player's inventory + gold
       and respawns them at the spawn point with starter loadout.
@@ -137,9 +152,35 @@ runs; server is authoritative; client keeps only a session token in
 
 - [ ] Replace cone mountains with low-poly mesh imports (still simple).
 - [ ] Bigger world, multiple biomes (still desert-themed for v1).
+- [ ] **Safe zones vs chaos zones**: divide the map so **safe zones** are a
+      minority of the area (spawn castle and any future havens). The **chaos
+      zones** — everywhere else — pack heavy mob and boss presence. Survival
+      there should push players to **move fast** or **group up**; solo slow
+      play in the open should be punishing. Server rules for aggro, spawn
+      density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs.
 - [ ] Sound effects (WebAudio, no external lib).
+- [ ] **Global boss-kill TTS**: when someone lands the **final blow** on a huge boss,
+      play a text-to-speech line for everyone: their nickname plus a short joke or riff
+      on that nickname (server-triggered in MP).
+- [ ] **Juice and feedback**: view bob, hit/blood VFX, blood or vignette on screen edges
+      when hurt, clear animations for weapon switches, enemy attacks, and other actions —
+      every action should read with motion and effects.
 - [ ] Minimap.
 - [ ] Daily reset / world events.
+
+---
+
+## Milestone 8 — Engineering, QA, and maintainability
+
+- [ ] **Versions**: automatic version bump on push/build/CI if feasible; **minimum** a
+      simple version file in the repo root that release/deploy must not forget to update.
+- [ ] **More automated testing**: expand coverage; **rigorous server-side tests** that
+      exercise the simulated world (e.g. track object coordinates and state across ticks)
+      so regressions in authority/simulation are caught early.
+- [ ] **LLM-assisted refactor pass**: use a large model for code review with focus on
+      scalability and maintainability (e.g. component system ideas); **capture the main
+      architectural decisions and patterns in `docs/`** so future humans and LLMs follow
+      the same structure.
 
 ---
 
