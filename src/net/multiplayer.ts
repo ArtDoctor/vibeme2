@@ -185,6 +185,30 @@ export class MultiplayerClient {
     }, ms);
   }
 
+  /** Buy one unit (server validates gold + range). */
+  sendShopBuy(shopIndex: number, buySku: string): void {
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(
+      JSON.stringify({
+        type: "shop",
+        shopIndex,
+        buySku,
+      }),
+    );
+  }
+
+  /** Sell stackable items for gold (server validates range + price). */
+  sendShopSell(shopIndex: number, kind: string, count: number): void {
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(
+      JSON.stringify({
+        type: "shop",
+        shopIndex,
+        sell: { kind, count },
+      }),
+    );
+  }
+
   dispose(): void {
     if (this.sendInterval !== null) {
       clearInterval(this.sendInterval);

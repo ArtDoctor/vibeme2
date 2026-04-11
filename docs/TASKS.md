@@ -94,8 +94,12 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
 
 ## Milestone 4 — Economy and progression
 
-- [ ] **Shops** scattered around the map. Each shop = one box building +
-      one NPC box. Interact key opens a tiny inventory UI.
+- [~] **Shops** — **7 stalls**, one at the center of each **safe-zone** courtyard
+      (same indices as `ALL_SPAWN_SAFE_ZONE_AABBS` / `SAFE_ZONE_SHOP_CENTERS_XZ`).
+      **Corner** outposts (NW/NE/SW/SE) sell **advanced** gear (steel, vanguard, …);
+      spawn + **north** + **south** edge stalls sell **traveler** basics (iron, shield,
+      bow, scout armor). Box building + NPC; **E** opens buy UI. Server requires
+      standing in a safe zone + in range of that stall.
 - [ ] **Full inventory system**: carry multiple weapons and items, loot gear from
       dead players, sell surplus, and choose loadouts or sets when swapping (ties
       into shop UI and Milestone 2 loadout rules).

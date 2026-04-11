@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -7,13 +7,14 @@ use crate::combat::{
     arrow_hits_player, damage_after_armor, damage_after_shield_melee,
     damage_after_shield_ranged, frontal_dot, integrate_arrow, melee_hit_valid,
     point_in_spawn_safe_zone, spawn_arrow_from_mob, spawn_arrow_from_player, Arrow, WeaponKind,
-    ARROW_DAMAGE, BOW_MIN_CHARGE, MAX_HP, MAX_STAMINA, MELEE_DAMAGE, STAMINA_BLOCK_PER_S,
+    ARROW_DAMAGE, BOW_MIN_CHARGE, MAX_HP, MAX_STAMINA, STAMINA_BLOCK_PER_S,
     STAMINA_BOW_CHARGE_PER_S, STAMINA_BOW_FIRE, STAMINA_MELEE, STAMINA_REGEN_PER_S,
     SWING_COOLDOWN_S,
 };
 use crate::interest::SpatialIndex;
 use crate::items::{
-    armor_piece_inventory_kind, inventory_item_for_main_hand, inventory_item_for_off_hand,
+    armor_piece_inventory_kind, default_main_hand_from_inventory, inventory_item_for_main_hand,
+    inventory_item_for_off_hand, melee_damage_for_main_hand, sell_price_gold,
     ArmorPieceKind, ArmorSlots, EquipmentState, InventoryEntry, InventoryItemKind, InventoryState,
     MainHandKind, OffHandKind, PickupKind,
 };
@@ -23,7 +24,9 @@ use crate::mobs::{
     MobPlayerHit, TRAINING_DUMMY_HP,
 };
 use crate::validate::clamp_claimed_position;
-use crate::world::{sample_terrain_height, AabbCollider, EYE_HEIGHT};
+use crate::world::{
+    sample_terrain_height, AabbCollider, EYE_HEIGHT, SAFE_ZONE_SHOP_CENTERS_XZ,
+};
 
 const PLAYER_VISIBILITY_RADIUS: f64 = 65.0;
 const MOB_VISIBILITY_RADIUS: f64 = 70.0;
@@ -33,9 +36,144 @@ const PICKUP_VISIBILITY_RADIUS: f64 = 78.0;
 const PICKUP_RADIUS: f64 = 1.25;
 const PICKUP_RESPAWN_S: f64 = 4.0;
 
+/// One stall per PvP-safe courtyard — indices match [`SAFE_ZONE_SHOP_CENTERS_XZ`] / client `ALL_SPAWN_SAFE_ZONE_AABBS`.
+const SHOP_INTERACT_RADIUS: f64 = 3.85;
+
+#[derive(Clone, Copy)]
+struct ShopOffer {
+    sku: &'static str,
+    item: InventoryItemKind,
+    price: u32,
+    needs_boss: bool,
+}
+
+/// Traveler stalls: spawn, north edge, south edge — iron tier and essentials only.
+const SHOP_OFFERS_BASIC: &[ShopOffer] = &[
+    ShopOffer {
+        sku: "ironSword",
+        item: InventoryItemKind::IronSword,
+        price: 42,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "basicShield",
+        item: InventoryItemKind::BasicShield,
+        price: 32,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "shortBow",
+        item: InventoryItemKind::ShortBow,
+        price: 52,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutHelm",
+        item: InventoryItemKind::ScoutHelm,
+        price: 18,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutChest",
+        item: InventoryItemKind::ScoutChest,
+        price: 26,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutLegs",
+        item: InventoryItemKind::ScoutLegs,
+        price: 20,
+        needs_boss: false,
+    },
+];
+
+/// Corner outposts — steel, vanguard, full selection (Milestone 4).
+const SHOP_OFFERS_ADVANCED: &[ShopOffer] = &[
+    ShopOffer {
+        sku: "ironSword",
+        item: InventoryItemKind::IronSword,
+        price: 38,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "steelSword",
+        item: InventoryItemKind::SteelSword,
+        price: 92,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "vanguardSword",
+        item: InventoryItemKind::VanguardSword,
+        price: 185,
+        needs_boss: true,
+    },
+    ShopOffer {
+        sku: "basicShield",
+        item: InventoryItemKind::BasicShield,
+        price: 29,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "shortBow",
+        item: InventoryItemKind::ShortBow,
+        price: 48,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutHelm",
+        item: InventoryItemKind::ScoutHelm,
+        price: 16,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutChest",
+        item: InventoryItemKind::ScoutChest,
+        price: 24,
+        needs_boss: false,
+    },
+    ShopOffer {
+        sku: "scoutLegs",
+        item: InventoryItemKind::ScoutLegs,
+        price: 18,
+        needs_boss: false,
+    },
+];
+
+/// Indices `2..=5` are the four corner safe zones (see `spawnSafeZone.ts` order).
+#[inline]
+fn shop_is_advanced(shop_index: usize) -> bool {
+    matches!(shop_index, 2..=5)
+}
+
+fn shop_offers_for(shop_index: usize) -> &'static [ShopOffer] {
+    if shop_is_advanced(shop_index) {
+        SHOP_OFFERS_ADVANCED
+    } else {
+        SHOP_OFFERS_BASIC
+    }
+}
+
+fn shop_offer_for(shop_index: usize, sku: &str) -> Option<&'static ShopOffer> {
+    let key = sku.trim();
+    shop_offers_for(shop_index)
+        .iter()
+        .find(|o| o.sku == key)
+}
+
 #[inline]
 fn pickup_gold_is_zero(n: &u32) -> bool {
     *n == 0
+}
+
+#[inline]
+fn pickup_item_count_is_zero(n: &u16) -> bool {
+    *n == 0
+}
+
+#[inline]
+fn death_loot_offset(index: u32) -> (f64, f64) {
+    let a = index as f64 * 1.47;
+    (a.cos() * 0.55, a.sin() * 0.55)
 }
 
 /// Returns boot-time simulation options for world setup and automated tests.
@@ -95,6 +233,8 @@ struct Player {
     swing_cooldown_s: f64,
     /// Seconds remaining for remote swing animation.
     swing_visual_s: f64,
+    /// Unlocks boss-tier shop gear for this session (persists across death).
+    boss_unlock: bool,
 }
 
 #[derive(Clone)]
@@ -107,6 +247,9 @@ struct Pickup {
     z: f64,
     /// Gold pieces when `kind == Gold`; otherwise 0.
     gold_amount: u32,
+    /// When `kind == Item`, which stack is on the ground.
+    item_kind: Option<InventoryItemKind>,
+    item_count: u16,
 }
 
 /// Returns a transport-ready full-world snapshot for all connected clients.
@@ -148,6 +291,7 @@ struct PlayerSnapshot {
     blocking: bool,
     bow_charge: f64,
     swing_t: f64,
+    boss_unlock: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -170,6 +314,10 @@ struct PickupSnapshot {
     z: f64,
     #[serde(default, skip_serializing_if = "pickup_gold_is_zero")]
     gold_amount: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    item_kind: Option<InventoryItemKind>,
+    #[serde(default, skip_serializing_if = "pickup_item_count_is_zero")]
+    item_count: u16,
 }
 
 #[derive(Clone, Serialize)]
@@ -253,7 +401,10 @@ fn spawn_eye_y() -> f64 {
 
 fn active_weapon_from_main_hand(kind: MainHandKind) -> WeaponKind {
     match kind {
-        MainHandKind::WoodenSword => WeaponKind::Sword,
+        MainHandKind::WoodenSword
+        | MainHandKind::IronSword
+        | MainHandKind::SteelSword
+        | MainHandKind::VanguardSword => WeaponKind::Sword,
         MainHandKind::ShortBow => WeaponKind::Bow,
     }
 }
@@ -269,10 +420,9 @@ fn mob_kind_tag(mob: &Mob) -> &'static str {
 
 fn pickup_target_count(kind: PickupKind) -> u32 {
     match kind {
-        PickupKind::Shield => 20,
-        PickupKind::Bow => 20,
-        PickupKind::Armor => 10,
-        PickupKind::Gold | PickupKind::GearToken => 0,
+        // Milestone 4: gear comes from shops, mob drops, and player death loot — not infinite world rings.
+        PickupKind::Shield | PickupKind::Bow | PickupKind::Armor => 0,
+        PickupKind::Gold | PickupKind::GearToken | PickupKind::Item => 0,
     }
 }
 
@@ -281,7 +431,7 @@ fn pickup_slot_position(kind: PickupKind, slot: u32) -> (f64, f64) {
         PickupKind::Shield => (10_u32, 24.0, 20.0, 0.2),
         PickupKind::Bow => (10_u32, 34.0, 20.0, 0.52),
         PickupKind::Armor => (5_u32, 52.0, 18.0, 0.88),
-        PickupKind::Gold | PickupKind::GearToken => (1_u32, 0.0, 1.0, 0.0),
+        PickupKind::Gold | PickupKind::GearToken | PickupKind::Item => (1_u32, 0.0, 1.0, 0.0),
     };
     let ring = slot / per_ring;
     let ring_slot = slot % per_ring;
@@ -310,6 +460,7 @@ impl Player {
             bow_charge: 0.0,
             swing_cooldown_s: 0.0,
             swing_visual_s: 0.0,
+            boss_unlock: false,
         }
     }
 
@@ -348,7 +499,7 @@ impl Player {
                 self.equipment.main_hand = kind;
             }
         } else if !self.has_main_hand(self.equipment.main_hand) {
-            self.equipment.main_hand = MainHandKind::WoodenSword;
+            self.equipment.main_hand = default_main_hand_from_inventory(&self.inventory);
         }
 
         if let Some(next_off_hand) = desired_off_hand {
@@ -375,7 +526,7 @@ impl Player {
 
     fn can_block_with_shield(&self) -> bool {
         self.blocking
-            && self.equipment.main_hand == MainHandKind::WoodenSword
+            && self.equipment.main_hand.is_sword()
             && self.equipment.off_hand == Some(OffHandKind::BasicShield)
     }
 
@@ -600,6 +751,76 @@ impl Simulation {
         self.players.contains_key(&id)
     }
 
+    /// Buy one unit from a safe-zone shop (`shop_index` matches `SAFE_ZONE_SHOP_CENTERS_XZ`).
+    pub fn shop_buy(
+        &mut self,
+        player_id: Uuid,
+        shop_index: usize,
+        sku: &str,
+    ) -> Result<(), &'static str> {
+        let Some(&(sx, sz)) = SAFE_ZONE_SHOP_CENTERS_XZ.get(shop_index) else {
+            return Err("Invalid shop.");
+        };
+        let Some(offer) = shop_offer_for(shop_index, sku) else {
+            return Err("Unknown item.");
+        };
+        let Some(player) = self.players.get_mut(&player_id) else {
+            return Err("No player.");
+        };
+        if !point_in_spawn_safe_zone(player.x, player.z) {
+            return Err("Shop only in a safe zone.");
+        }
+        let dx = player.x - sx;
+        let dz = player.z - sz;
+        if dx * dx + dz * dz > SHOP_INTERACT_RADIUS * SHOP_INTERACT_RADIUS {
+            return Err("Too far from shop.");
+        }
+        if offer.needs_boss && !player.boss_unlock {
+            return Err("Requires a boss trophy.");
+        }
+        if player.gold < offer.price {
+            return Err("Not enough gold.");
+        }
+        player.gold -= offer.price;
+        player.inventory.add(offer.item, 1);
+        Ok(())
+    }
+
+    /// Sell stackable items for gold while near a shop.
+    pub fn shop_sell(
+        &mut self,
+        player_id: Uuid,
+        shop_index: usize,
+        kind: InventoryItemKind,
+        count: u16,
+    ) -> Result<(), &'static str> {
+        let Some(&(sx, sz)) = SAFE_ZONE_SHOP_CENTERS_XZ.get(shop_index) else {
+            return Err("Invalid shop.");
+        };
+        let unit = sell_price_gold(kind);
+        if unit == 0 || count == 0 {
+            return Err("Cannot sell that.");
+        }
+        let Some(player) = self.players.get_mut(&player_id) else {
+            return Err("No player.");
+        };
+        if !point_in_spawn_safe_zone(player.x, player.z) {
+            return Err("Shop only in a safe zone.");
+        }
+        let dx = player.x - sx;
+        let dz = player.z - sz;
+        if dx * dx + dz * dz > SHOP_INTERACT_RADIUS * SHOP_INTERACT_RADIUS {
+            return Err("Too far from shop.");
+        }
+        let removed = player.inventory.remove(kind, count);
+        if removed == 0 {
+            return Err("Nothing to sell.");
+        }
+        let pay = unit.saturating_mul(u32::from(removed));
+        player.gold = player.gold.saturating_add(pay);
+        Ok(())
+    }
+
     /// Returns after removing a disconnected player from the live world.
     /// Limits: inventories/world drops are not persisted yet, so disconnect is a hard removal.
     pub fn remove_player(&mut self, id: Uuid) {
@@ -647,7 +868,7 @@ impl Simulation {
                 .map(|raw| OffHandKind::from_input(raw));
             player.apply_desired_loadout(desired_main_hand, desired_off_hand);
             player.blocking = input.blocking
-                && player.equipment.main_hand == MainHandKind::WoodenSword
+                && player.equipment.main_hand.is_sword()
                 && player.equipment.off_hand == Some(OffHandKind::BasicShield);
             player.bow_charge = if player.equipment.main_hand == MainHandKind::ShortBow {
                 input.bow_charge.clamp(0.0, 1.0)
@@ -782,6 +1003,7 @@ impl Simulation {
                     blocking: player.blocking,
                     bow_charge: player.bow_charge,
                     swing_t,
+                    boss_unlock: player.boss_unlock,
                 }
             })
             .collect::<Vec<_>>();
@@ -810,6 +1032,8 @@ impl Simulation {
                 y: pickup.y,
                 z: pickup.z,
                 gold_amount: pickup.gold_amount,
+                item_kind: pickup.item_kind,
+                item_count: pickup.item_count,
             })
             .collect::<Vec<_>>();
         pickups.sort_unstable_by_key(|pickup| pickup.id);
@@ -905,6 +1129,8 @@ impl Simulation {
                     y,
                     z,
                     gold_amount: 0,
+                    item_kind: None,
+                    item_count: 0,
                 });
                 self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
                 if self.pickups.iter().filter(|pickup| pickup.kind == kind).count() as u32 >= target
@@ -930,6 +1156,8 @@ impl Simulation {
                 y,
                 z,
                 gold_amount: gold,
+                item_kind: None,
+                item_count: 0,
             });
             self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
         }
@@ -945,40 +1173,97 @@ impl Simulation {
                 y: yt,
                 z: zt,
                 gold_amount: 0,
+                item_kind: None,
+                item_count: 0,
             });
             self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
         }
     }
 
+    fn spawn_death_loot(&mut self, x: f64, z: f64, gold: u32, inv: &InventoryState) {
+        let mut i = 0_u32;
+        if gold > 0 {
+            let (ox, oz) = death_loot_offset(i);
+            i += 1;
+            let px = x + ox;
+            let pz = z + oz;
+            let y = sample_terrain_height(px, pz) + 0.55;
+            self.pickups.push(Pickup {
+                id: self.next_pickup_id,
+                kind: PickupKind::Gold,
+                slot: 0,
+                x: px,
+                y,
+                z: pz,
+                gold_amount: gold,
+                item_kind: None,
+                item_count: 0,
+            });
+            self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
+        }
+        for entry in inv.entries() {
+            if entry.count == 0 {
+                continue;
+            }
+            let (ox, oz) = death_loot_offset(i);
+            i += 1;
+            let px = x + ox;
+            let pz = z + oz;
+            let y = sample_terrain_height(px, pz) + 0.55;
+            self.pickups.push(Pickup {
+                id: self.next_pickup_id,
+                kind: PickupKind::Item,
+                slot: 0,
+                x: px,
+                y,
+                z: pz,
+                gold_amount: 0,
+                item_kind: Some(entry.kind),
+                item_count: entry.count,
+            });
+            self.next_pickup_id = self.next_pickup_id.wrapping_add(1);
+        }
+    }
+
+    fn kill_player_with_loot(&mut self, victim_id: Uuid) {
+        let snapshot = self
+            .players
+            .get(&victim_id)
+            .map(|p| (p.x, p.z, p.gold, p.inventory.clone()));
+        let Some((x, z, gold, inv)) = snapshot else {
+            return;
+        };
+        self.deaths_this_tick.push(victim_id);
+        {
+            let player = self.players.get_mut(&victim_id).expect("player exists");
+            respawn_player(player);
+        }
+        self.spawn_death_loot(x, z, gold, &inv);
+    }
+
     fn collect_pickups(&mut self) {
-        let pickup_ids = self
-            .pickups
-            .iter()
-            .filter_map(|pickup| {
-                self.players.iter().find_map(|(player_id, player)| {
-                    let dy = (player.y - EYE_HEIGHT + 0.8) - pickup.y;
-                    let dx = player.x - pickup.x;
-                    let dz = player.z - pickup.z;
-                    if dx * dx + dz * dz + dy * dy <= PICKUP_RADIUS * PICKUP_RADIUS {
-                        Some((
-                            pickup.id,
-                            *player_id,
-                            pickup.kind,
-                            pickup.gold_amount,
-                        ))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        if pickup_ids.is_empty() {
+        let mut collected: Vec<(u32, Uuid)> = Vec::new();
+        for pickup in &self.pickups {
+            for (player_id, player) in &self.players {
+                let dy = (player.y - EYE_HEIGHT + 0.8) - pickup.y;
+                let dx = player.x - pickup.x;
+                let dz = player.z - pickup.z;
+                if dx * dx + dz * dz + dy * dy <= PICKUP_RADIUS * PICKUP_RADIUS {
+                    collected.push((pickup.id, *player_id));
+                    break;
+                }
+            }
+        }
+        if collected.is_empty() {
             return;
         }
 
-        for (_, player_id, kind, gold_amount) in &pickup_ids {
+        for (pickup_id, player_id) in &collected {
+            let Some(pickup) = self.pickups.iter().find(|p| p.id == *pickup_id) else {
+                continue;
+            };
             if let Some(player) = self.players.get_mut(player_id) {
-                match kind {
+                match pickup.kind {
                     PickupKind::Shield => {
                         player.inventory.add(InventoryItemKind::BasicShield, 1);
                         if player.equipment.off_hand.is_none() {
@@ -999,65 +1284,72 @@ impl Simulation {
                         };
                     }
                     PickupKind::Gold => {
-                        player.gold = player.gold.saturating_add(*gold_amount);
+                        player.gold = player.gold.saturating_add(pickup.gold_amount);
                     }
                     PickupKind::GearToken => {
                         player
                             .inventory
                             .add(InventoryItemKind::GearUpgradeToken, 1);
                     }
+                    PickupKind::Item => {
+                        if let Some(kind) = pickup.item_kind {
+                            player.inventory.add(kind, pickup.item_count);
+                        }
+                    }
                 }
             }
         }
 
-        self.pickups.retain(|pickup| {
-            !pickup_ids
-                .iter()
-                .any(|(pickup_id, _, _, _)| *pickup_id == pickup.id)
-        });
+        let consumed: HashSet<u32> = collected.iter().map(|(id, _)| *id).collect();
+        self.pickups
+            .retain(|pickup| !consumed.contains(&pickup.id));
     }
 
     fn apply_mob_player_hits(&mut self, hits: Vec<MobPlayerHit>) {
         for hit in hits {
-            let Some(player) = self.players.get_mut(&hit.player) else {
-                continue;
+            let id = hit.player;
+            let died = {
+                let Some(player) = self.players.get_mut(&id) else {
+                    continue;
+                };
+                if point_in_spawn_safe_zone(player.x, player.z) {
+                    continue;
+                }
+                let vx = hit.mob_x - player.x;
+                let vz = hit.mob_z - player.z;
+                let frontal = frontal_dot(player.yaw, vx, vz);
+                let damage = damage_after_armor(
+                    damage_after_shield_melee(
+                        hit.damage,
+                        player.blocking,
+                        player.equipment.off_hand == Some(OffHandKind::BasicShield)
+                            && player.equipment.main_hand.is_sword(),
+                        frontal,
+                    ),
+                    player.equipment.armor,
+                );
+                player.hp = (player.hp - damage).max(0.0);
+                player.hp <= 0.0
             };
-            if point_in_spawn_safe_zone(player.x, player.z) {
-                continue;
-            }
-            let vx = hit.mob_x - player.x;
-            let vz = hit.mob_z - player.z;
-            let frontal = frontal_dot(player.yaw, vx, vz);
-            let damage = damage_after_armor(
-                damage_after_shield_melee(
-                    hit.damage,
-                    player.blocking,
-                    player.equipment.off_hand == Some(OffHandKind::BasicShield)
-                        && player.equipment.main_hand == MainHandKind::WoodenSword,
-                    frontal,
-                ),
-                player.equipment.armor,
-            );
-            player.hp = (player.hp - damage).max(0.0);
-            if player.hp <= 0.0 {
-                self.deaths_this_tick.push(hit.player);
-                respawn_player(player);
+            if died {
+                self.kill_player_with_loot(id);
             }
         }
     }
 
     fn resolve_sword_swing(&mut self, attacker_id: Uuid) {
-        let can_swing = {
+        let swing_damage = {
             let Some(player) = self.players.get(&attacker_id) else {
                 return;
             };
-            player.equipment.main_hand == MainHandKind::WoodenSword
-                && player.swing_cooldown_s <= 0.0
-                && player.stamina >= STAMINA_MELEE
+            if !player.equipment.main_hand.is_sword()
+                || player.swing_cooldown_s > 0.0
+                || player.stamina < STAMINA_MELEE
+            {
+                return;
+            }
+            melee_damage_for_main_hand(player.equipment.main_hand)
         };
-        if !can_swing {
-            return;
-        }
 
         let attacker_in_safe = {
             let player = self
@@ -1110,7 +1402,7 @@ impl Simulation {
                     mob.z,
                     mob.kind,
                 );
-                mob.hp -= MELEE_DAMAGE;
+                mob.hp -= swing_damage;
                 if mob.kind == MobKind::TrainingDummy && mob.hp <= 0.0 {
                     mob.hp = TRAINING_DUMMY_HP;
                 }
@@ -1126,9 +1418,14 @@ impl Simulation {
                 x: fx,
                 y: fy,
                 z: fz,
-                amount: MELEE_DAMAGE,
+                amount: swing_damage,
             });
             if died {
+                if matches!(mk, MobKind::BossTank | MobKind::BossSummoner) {
+                    if let Some(att) = self.players.get_mut(&attacker_id) {
+                        att.boss_unlock = true;
+                    }
+                }
                 self.drop_mob_loot(mk, mid, mx, mz);
             }
         }
@@ -1155,10 +1452,10 @@ impl Simulation {
                 let frontal = frontal_dot(other.yaw, vx, vz);
                 let damage = damage_after_armor(
                     damage_after_shield_melee(
-                        MELEE_DAMAGE,
+                        swing_damage,
                         other.blocking,
                         other.equipment.off_hand == Some(OffHandKind::BasicShield)
-                            && other.equipment.main_hand == MainHandKind::WoodenSword,
+                            && other.equipment.main_hand.is_sword(),
                         frontal,
                     ),
                     other.equipment.armor,
@@ -1181,12 +1478,19 @@ impl Simulation {
                     amount: damage,
                 });
             }
+            let dead = self
+                .players
+                .get(&victim_id)
+                .map(|p| {
+                    let next = (p.hp - damage).max(0.0);
+                    next <= 0.0
+                })
+                .unwrap_or(false);
             if let Some(player) = self.players.get_mut(&victim_id) {
                 player.hp = (player.hp - damage).max(0.0);
-                if player.hp <= 0.0 {
-                    self.deaths_this_tick.push(victim_id);
-                    respawn_player(player);
-                }
+            }
+            if dead {
+                self.kill_player_with_loot(victim_id);
             }
         }
     }
@@ -1288,6 +1592,13 @@ impl Simulation {
                     amount: ARROW_DAMAGE,
                 });
                 if died {
+                    if owner != Uuid::nil()
+                        && matches!(mk, MobKind::BossTank | MobKind::BossSummoner)
+                    {
+                        if let Some(att) = self.players.get_mut(&owner) {
+                            att.boss_unlock = true;
+                        }
+                    }
                     self.drop_mob_loot(mk, mid, mx, mz);
                 }
                 self.arrows.swap_remove(index);
@@ -1312,7 +1623,7 @@ impl Simulation {
                             heavy,
                             player.blocking,
                             player.equipment.off_hand == Some(OffHandKind::BasicShield)
-                                && player.equipment.main_hand == MainHandKind::WoodenSword,
+                                && player.equipment.main_hand.is_sword(),
                             frontal,
                         ),
                         player.equipment.armor,
@@ -1337,12 +1648,16 @@ impl Simulation {
                             amount: damage,
                         });
                     }
+                    let dead = self
+                        .players
+                        .get(&player_id)
+                        .map(|p| (p.hp - damage).max(0.0) <= 0.0)
+                        .unwrap_or(false);
                     if let Some(player) = self.players.get_mut(&player_id) {
                         player.hp = (player.hp - damage).max(0.0);
-                        if player.hp <= 0.0 {
-                            self.deaths_this_tick.push(player_id);
-                            respawn_player(player);
-                        }
+                    }
+                    if dead {
+                        self.kill_player_with_loot(player_id);
                     }
                 }
                 self.arrows.swap_remove(index);
@@ -1575,52 +1890,18 @@ mod tests {
     }
 
     #[test]
-    fn shield_pickups_refill_to_target_count() {
-        let colliders = build_colliders();
-        let mut sim = Simulation::new(SimConfig {
+    fn world_ring_shield_pickups_disabled_for_milestone4_shops() {
+        let sim = Simulation::new(SimConfig {
             spawn_training_dummy: false,
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _) = sim.join_player("collector".to_string()).expect("join succeeds");
-        let shield_pickup = sim
-            .pickups
-            .iter()
-            .find(|pickup| pickup.kind == PickupKind::Shield)
-            .cloned()
-            .expect("shield pickup exists");
-        {
-            let player = sim.players.get_mut(&player_id).expect("player exists");
-            player.x = shield_pickup.x;
-            player.z = shield_pickup.z;
-            player.y = sample_terrain_height(player.x, player.z) + EYE_HEIGHT;
-        }
-
-        sim.tick(1.0 / 20.0, 1, &colliders);
-        assert_eq!(
-            sim.players
-                .get(&player_id)
-                .expect("player exists")
-                .inventory
-                .count(InventoryItemKind::BasicShield),
-            1
-        );
         assert_eq!(
             sim.pickups
                 .iter()
                 .filter(|pickup| pickup.kind == PickupKind::Shield)
                 .count(),
-            19
-        );
-
-        sim.pickup_spawn_timer = 0.0;
-        sim.tick(1.0 / 20.0, 2, &colliders);
-        assert_eq!(
-            sim.pickups
-                .iter()
-                .filter(|pickup| pickup.kind == PickupKind::Shield)
-                .count(),
-            20
+            0
         );
     }
 
@@ -1691,6 +1972,7 @@ mod tests {
         sim.resolve_sword_swing(attacker_id);
         let victim = sim.players.get(&victim_id).expect("victim exists");
         assert!(victim.hp < MAX_HP);
-        assert!(victim.hp > MAX_HP - MELEE_DAMAGE);
+        let swing = crate::items::melee_damage_for_main_hand(MainHandKind::WoodenSword);
+        assert!(victim.hp > MAX_HP - swing);
     }
 }

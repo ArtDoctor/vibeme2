@@ -10,6 +10,7 @@ import type {
   OffHandKind,
   SnapshotPlayer,
 } from "../net/types";
+import { mainHandIsSword } from "../net/types";
 
 const STEEL_MAT = new MeshLambertMaterial({ color: 0xb8c4d0 });
 const GRIP_MAT = new MeshLambertMaterial({ color: 0x5c4030 });
@@ -148,7 +149,7 @@ export function setWeaponVisible(
   mainHand: MainHandKind,
   offHand: OffHandKind | null,
 ): void {
-  const swordActive = mainHand === "woodenSword";
+  const swordActive = mainHandIsSword(mainHand);
   sword.visible = swordActive;
   shield.visible = swordActive && offHand === "basicShield";
   bow.visible = mainHand === "shortBow";
@@ -171,7 +172,7 @@ export function animateWeaponGroups(
   sword.rotation.x = -swing * 1.12;
 
   const shieldBlock =
-    p.blocking && p.mainHand === "woodenSword" && p.offHand === "basicShield";
+    p.blocking && mainHandIsSword(p.mainHand) && p.offHand === "basicShield";
   const bl = (shield.userData as { shieldBaseline?: ShieldBaseline })
     .shieldBaseline;
   if (bl) {

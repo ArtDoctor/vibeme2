@@ -177,6 +177,8 @@ export class WorldMobs {
   }
 
   update(delta: number): void {
+    /** `Vector3.project` uses `matrixWorldInverse`; keep in sync after camera moves (third person, etc.). */
+    this.camera.updateMatrixWorld(true);
     const rect = this.overlay.getBoundingClientRect();
     const d = Math.min(delta, 0.05);
 
@@ -242,7 +244,7 @@ export class WorldMobs {
 
   private isInFront(wx: number, wy: number, wz: number): boolean {
     const c = this.camera;
-    this.forward.set(0, 0, -1).applyQuaternion(c.quaternion);
+    c.getWorldDirection(this.forward);
     const dx = wx - c.position.x;
     const dy = wy - c.position.y;
     const dz = wz - c.position.z;

@@ -12,6 +12,7 @@ const BOW_MAT = new MeshLambertMaterial({ color: 0x946234 });
 const ARMOR_MAT = new MeshLambertMaterial({ color: 0xa7864d });
 const GOLD_MAT = new MeshLambertMaterial({ color: 0xc9a227 });
 const TOKEN_MAT = new MeshLambertMaterial({ color: 0x9b7cff });
+const ITEM_MAT = new MeshLambertMaterial({ color: 0xb060c8 });
 
 type PickupView = {
   root: Group;
@@ -88,6 +89,9 @@ function buildPickupMesh(kind: SnapshotPickup["kind"]): Group {
       break;
     case "gearToken":
       mesh = new Mesh(new BoxGeometry(0.32, 0.08, 0.42), TOKEN_MAT);
+      break;
+    case "item":
+      mesh = new Mesh(new BoxGeometry(0.4, 0.36, 0.4), ITEM_MAT);
       break;
     default:
       mesh = new Mesh(new BoxGeometry(0.52, 0.68, 0.08), SHIELD_MAT);

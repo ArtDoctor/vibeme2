@@ -23,6 +23,7 @@ use tower_http::services::ServeDir;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::items::inventory_item_kind_from_client;
 use crate::protocol::{ClientMsg, JoinErrorOut, WelcomeOut};
 use crate::sim::{valid_nickname, InputCommand, SimConfig, Simulation, SnapshotFrame};
 use crate::world::{build_colliders, AabbCollider};
@@ -133,7 +134,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 None => return,
             }
         }
-        ClientMsg::Input { .. } => {
+        ClientMsg::Input { .. } | ClientMsg::Shop { .. } => {
             send_join_error(&mut write_half, "First message must be a join.").await;
             let _ = write_half.close().await;
             return;
@@ -167,27 +168,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             Ok(msg) => msg,
                             Err(_) => continue,
                         };
-                        if let ClientMsg::Input {
-                            x,
-                            y,
-                            z,
-                            yaw,
-                            pitch,
-                            creative,
-                            flying,
-                            sprinting,
-                            main_hand,
-                            off_hand,
-                            blocking,
-                            bow_charge,
-                            swing,
-                            fire_arrow,
-                            ..
-                        } = parsed
-                        {
-                            let dt = last_input_at.elapsed().as_secs_f64();
-                            last_input_at = Instant::now();
-                            let input = InputCommand {
+                        match parsed {
+                            ClientMsg::Input {
                                 x,
                                 y,
                                 z,
@@ -202,11 +184,52 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 bow_charge,
                                 swing,
                                 fire_arrow,
-                            };
-                            let mut simulation = sim.write().await;
-                            if !simulation.apply_input(player_id, &input, dt, colliders.as_slice()) {
-                                break;
+                                ..
+                            } => {
+                                let dt = last_input_at.elapsed().as_secs_f64();
+                                last_input_at = Instant::now();
+                                let input = InputCommand {
+                                    x,
+                                    y,
+                                    z,
+                                    yaw,
+                                    pitch,
+                                    creative,
+                                    flying,
+                                    sprinting,
+                                    main_hand,
+                                    off_hand,
+                                    blocking,
+                                    bow_charge,
+                                    swing,
+                                    fire_arrow,
+                                };
+                                let mut simulation = sim.write().await;
+                                if !simulation.apply_input(player_id, &input, dt, colliders.as_slice())
+                                {
+                                    break;
+                                }
                             }
+                            ClientMsg::Shop {
+                                shop_index,
+                                buy_sku,
+                                sell,
+                            } => {
+                                let mut simulation = sim.write().await;
+                                if let Some(sku) = buy_sku {
+                                    let _ = simulation.shop_buy(player_id, shop_index, sku.trim());
+                                } else if let Some(s) = sell {
+                                    if let Some(kind) = inventory_item_kind_from_client(&s.kind) {
+                                        let _ = simulation.shop_sell(
+                                            player_id,
+                                            shop_index,
+                                            kind,
+                                            s.count,
+                                        );
+                                    }
+                                }
+                            }
+                            ClientMsg::Join { .. } => {}
                         }
                     }
                     Some(Ok(Message::Close(_))) => break,

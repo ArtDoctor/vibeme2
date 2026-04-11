@@ -17,6 +17,7 @@ const safeZoneHint = document.getElementById("hud-safe") ?? undefined;
 const creativeHint = document.getElementById("hud-creative") ?? undefined;
 const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const hudCompass = document.getElementById("hud-compass") ?? undefined;
+const shopPanel = document.getElementById("shop-panel") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
 const joinNickname = document.getElementById("join-nickname");
 const joinSubmit = document.getElementById("join-submit");
@@ -119,6 +120,7 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       hudCombat,
       localPlayerId: mp.id,
       compassEl: hudCompass,
+      shopPanel,
     });
     game.attachMultiplayer(mp);
     hideJoinPanel();

@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 /// Returns the first decoded client message from the WebSocket stream.
 /// Limits: this is transport-level validation only; gameplay validation happens in `sim.rs`.
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShopSellIn {
+    pub kind: String,
+    pub count: u16,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ClientMsg {
     #[serde(rename = "join")]
@@ -10,6 +17,14 @@ pub enum ClientMsg {
         nickname: String,
         #[serde(default)]
         session: Option<String>,
+    },
+    #[serde(rename = "shop")]
+    Shop {
+        shop_index: usize,
+        #[serde(default)]
+        buy_sku: Option<String>,
+        #[serde(default)]
+        sell: Option<ShopSellIn>,
     },
     #[serde(rename = "input")]
     Input {

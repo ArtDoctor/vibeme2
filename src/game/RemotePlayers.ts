@@ -9,6 +9,8 @@ import {
   Sprite,
   SpriteMaterial,
   SRGBColorSpace,
+  type Camera,
+  Vector3,
 } from "three";
 import { avatarRotationYFromCombatYaw } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
@@ -60,6 +62,7 @@ function lerpSnapshotPlayer(
     blocking,
     bowCharge: a.bowCharge + (b.bowCharge - a.bowCharge) * u,
     swingT: a.swingT + (b.swingT - a.swingT) * u,
+    bossUnlock: u >= 0.5 ? b.bossUnlock : a.bossUnlock,
   };
 }
 
@@ -120,6 +123,8 @@ function resolveInterpolatedPlayer(
   return lerpSnapshotPlayer(cur.p, nxt.p, alpha);
 }
 
+const viewFacingScratch = new Vector3();
+
 const TORSO_MAT = new MeshLambertMaterial({ color: 0x4a8c6a });
 const HEAD_MAT = new MeshLambertMaterial({ color: 0xe8c4a0 });
 const LIMB_MAT = new MeshLambertMaterial({ color: 0x3d7358 });
@@ -150,7 +155,7 @@ function makeNicknameSprite(nickname: string): Sprite {
   const mat = new SpriteMaterial({
     map: tex,
     transparent: true,
-    depthTest: true,
+    depthTest: false,
     depthWrite: false,
   });
   const sprite = new Sprite(mat);
@@ -206,10 +211,28 @@ export function createPlayerAvatarRig(nickname: string): Group {
   return root;
 }
 
-export function updatePlayerAvatarRig(g: Group, p: SnapshotPlayer): void {
+export function updatePlayerAvatarRig(
+  g: Group,
+  p: SnapshotPlayer,
+  opts?: { viewCamera?: Camera },
+): void {
   const feetY = p.y - EYE_HEIGHT;
   g.position.set(p.x, feetY, p.z);
-  g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
+  if (opts?.viewCamera) {
+    const cam = opts.viewCamera;
+    cam.updateMatrixWorld(true);
+    cam.getWorldDirection(viewFacingScratch);
+    viewFacingScratch.y = 0;
+    const lenSq = viewFacingScratch.lengthSq();
+    if (lenSq > 1e-10) {
+      viewFacingScratch.multiplyScalar(1 / Math.sqrt(lenSq));
+      g.rotation.y = Math.atan2(viewFacingScratch.x, viewFacingScratch.z);
+    } else {
+      g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
+    }
+  } else {
+    g.rotation.y = avatarRotationYFromCombatYaw(p.yaw);
+  }
 
   const sword = g.userData.sword as Group;
   const shield = g.userData.shield as Group;

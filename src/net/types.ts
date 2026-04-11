@@ -17,18 +17,36 @@ export interface JoinErrorMsg {
 }
 
 export type WeaponKind = "sword" | "shield" | "bow";
-export type MainHandKind = "woodenSword" | "shortBow";
+export type MainHandKind =
+  | "woodenSword"
+  | "ironSword"
+  | "steelSword"
+  | "vanguardSword"
+  | "shortBow";
 export type OffHandKind = "basicShield";
 export type ArmorPieceKind = "scoutHelm" | "scoutChest" | "scoutLegs";
 export type InventoryItemKind =
   | "woodenSword"
+  | "ironSword"
+  | "steelSword"
+  | "vanguardSword"
   | "basicShield"
   | "shortBow"
   | "scoutHelm"
   | "scoutChest"
   | "scoutLegs"
   | "gearUpgradeToken";
-export type PickupKind = "shield" | "bow" | "armor" | "gold" | "gearToken";
+export type PickupKind =
+  | "shield"
+  | "bow"
+  | "armor"
+  | "gold"
+  | "gearToken"
+  | "item";
+
+export function mainHandIsSword(k: MainHandKind): boolean {
+  return k !== "shortBow";
+}
 
 export interface InventoryEntry {
   kind: InventoryItemKind;
@@ -61,6 +79,8 @@ export interface SnapshotPlayer {
   bowCharge: number;
   /** 0–1 swing animation phase for remote rigs. */
   swingT: number;
+  /** Server: can buy boss-locked shop gear after killing a boss (persists across death). */
+  bossUnlock: boolean;
 }
 
 export interface SnapshotArrow {
@@ -79,6 +99,9 @@ export interface SnapshotPickup {
   z: number;
   /** Present when `kind === "gold"`. */
   goldAmount?: number;
+  /** Present when `kind === "item"`. */
+  itemKind?: InventoryItemKind;
+  itemCount?: number;
 }
 
 export type MobKind =

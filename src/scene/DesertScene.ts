@@ -22,6 +22,8 @@ import {
   isNearAnySafeZoneCastle,
   isPointInSpawnSafeZone,
 } from "../world/spawnSafeZone";
+import { SHOP_POSITIONS } from "../world/shops";
+import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
 import { hash2 } from "../utils/math";
 import {
   TERRAIN_HALF_SIZE,
@@ -198,12 +200,35 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   const outE = SAFE_ZONE_OUTPOST_EDGE_CENTER;
   addSpawnCastle(scene, colliders, sampleTerrainHeight);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, 0, outE);
+  addSpawnCastle(scene, colliders, sampleTerrainHeight, 0, -outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, -outE, -outE);
   addSpawnCastle(scene, colliders, sampleTerrainHeight, outE, -outE);
 
-  // TODO(multiplayer): shops, NPCs, mob spawners, boss arenas, team flags.
+  const shopHutMat = new MeshLambertMaterial({ color: 0x6a5a4a });
+  const shopHutMatAdvanced = new MeshLambertMaterial({ color: 0x5a4a3a });
+  const shopNpcMat = new MeshLambertMaterial({ color: 0xc8a070 });
+  const shopNpcMatAdvanced = new MeshLambertMaterial({ color: 0xe8b060 });
+  for (let si = 0; si < SHOP_POSITIONS.length; si += 1) {
+    const p = SHOP_POSITIONS[si];
+    const advanced = isAdvancedShopSafeZoneIndex(si);
+    const y0 = sampleTerrainHeight(p.x, p.z);
+    const hut = new Mesh(
+      new BoxGeometry(3.4, 2.4, 3.0),
+      advanced ? shopHutMatAdvanced : shopHutMat,
+    );
+    hut.position.set(p.x, y0 + 1.2, p.z);
+    scene.add(hut);
+    const npc = new Mesh(
+      new BoxGeometry(0.55, 1.5, 0.42),
+      advanced ? shopNpcMatAdvanced : shopNpcMat,
+    );
+    npc.position.set(p.x + 1.15, y0 + 0.78, p.z + 0.25);
+    scene.add(npc);
+  }
+
+  // TODO(multiplayer): mob spawners, boss arenas, team flags.
   // TODO(content): replace cones with proper mountain meshes once art exists.
 
   const spawn = new Vector3(0, sampleTerrainHeight(0, 0), 0);

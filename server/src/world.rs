@@ -4,7 +4,7 @@
 pub const TERRAIN_HALF_SIZE: f64 = 600.0;
 /// Half-extent of each PvP-safe courtyard (matches `SPAWN_SAFE_ZONE_HALF` in `spawnSafeZone.ts`).
 pub const SPAWN_SAFE_ZONE_HALF: f64 = 5.0;
-/// Inset from the terrain edge for corner/north outposts (matches `SAFE_ZONE_EDGE_INSET`).
+/// Inset from the terrain edge for edge/corner outposts (matches `SAFE_ZONE_EDGE_INSET`).
 pub const SAFE_ZONE_EDGE_INSET: f64 = 15.0;
 
 /// Axis-aligned safe zones `(min_x, max_x, min_z, max_z)` — same layout as `ALL_SPAWN_SAFE_ZONE_AABBS` in `spawnSafeZone.ts`.
@@ -14,7 +14,7 @@ pub const BOSS_TANK_Z: f64 = 175.0;
 pub const BOSS_SUMMONER_X: f64 = 165.0;
 pub const BOSS_SUMMONER_Z: f64 = -170.0;
 
-pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 6] = {
+pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 7] = {
     let h = SPAWN_SAFE_ZONE_HALF;
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
     [
@@ -24,6 +24,21 @@ pub const SPAWN_SAFE_ZONES: [(f64, f64, f64, f64); 6] = {
         (e - h, e + h, e - h, e + h),
         (-e - h, -e + h, -e - h, -e + h),
         (e - h, e + h, -e - h, -e + h),
+        (-h, h, -e - h, -e + h),
+    ]
+};
+
+/// Courtyard center (x, z) for each entry in [`SPAWN_SAFE_ZONES`] — Milestone 4 shop stalls.
+pub const SAFE_ZONE_SHOP_CENTERS_XZ: [(f64, f64); 7] = {
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    [
+        (0.0, 0.0),
+        (0.0, e),
+        (-e, e),
+        (e, e),
+        (-e, -e),
+        (e, -e),
+        (0.0, -e),
     ]
 };
 
@@ -128,6 +143,7 @@ pub fn build_colliders() -> Vec<AabbCollider> {
     let out_e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
     add_spawn_castle(&mut colliders, 0.0, 0.0);
     add_spawn_castle(&mut colliders, 0.0, out_e);
+    add_spawn_castle(&mut colliders, 0.0, -out_e);
     add_spawn_castle(&mut colliders, -out_e, out_e);
     add_spawn_castle(&mut colliders, out_e, out_e);
     add_spawn_castle(&mut colliders, -out_e, -out_e);
@@ -141,7 +157,7 @@ fn near_any_safe_zone_castle(x: f64, z: f64, radius: f64) -> bool {
         return true;
     }
     let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
-    for &(cx, cz) in &[(0.0, e), (-e, e), (e, e), (-e, -e), (e, -e)] {
+    for &(cx, cz) in &[(0.0, e), (0.0, -e), (-e, e), (e, e), (-e, -e), (e, -e)] {
         let dx = x - cx;
         let dz = z - cz;
         if (dx * dx + dz * dz).sqrt() < radius {

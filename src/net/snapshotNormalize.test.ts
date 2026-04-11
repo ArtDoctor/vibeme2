@@ -43,6 +43,7 @@ describe("normalizeSnapshotPlayer", () => {
     expect(p.bowCharge).toBe(0);
     expect(p.swingT).toBe(0);
     expect(p.blocking).toBe(false);
+    expect(p.bossUnlock).toBe(false);
     expect(p.gold).toBe(0);
     expect(p.hp).toBe(100);
     expect(p.stamina).toBe(100);

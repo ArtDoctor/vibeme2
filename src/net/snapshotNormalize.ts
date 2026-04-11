@@ -60,8 +60,14 @@ export function normalizeWeaponKind(raw: unknown): WeaponKind {
 }
 
 export function normalizeMainHandKind(raw: unknown): MainHandKind {
-  if (raw === "shortBow") {
-    return "shortBow";
+  if (
+    raw === "woodenSword" ||
+    raw === "shortBow" ||
+    raw === "ironSword" ||
+    raw === "steelSword" ||
+    raw === "vanguardSword"
+  ) {
+    return raw;
   }
   return DEFAULT_MAIN_HAND;
 }
@@ -79,6 +85,10 @@ function normalizeArmorPieceKind(raw: unknown): ArmorPieceKind | null {
 
 function normalizeInventoryItemKind(raw: unknown): InventoryItemKind {
   switch (raw) {
+    case "woodenSword":
+    case "ironSword":
+    case "steelSword":
+    case "vanguardSword":
     case "basicShield":
     case "shortBow":
     case "scoutHelm":
@@ -115,7 +125,13 @@ function normalizeInventoryEntry(raw: unknown): InventoryEntry {
 }
 
 function normalizePickupKind(raw: unknown): PickupKind {
-  if (raw === "bow" || raw === "armor" || raw === "gold" || raw === "gearToken") {
+  if (
+    raw === "bow" ||
+    raw === "armor" ||
+    raw === "gold" ||
+    raw === "gearToken" ||
+    raw === "item"
+  ) {
     return raw;
   }
   return "shield";
@@ -154,6 +170,7 @@ export function normalizeSnapshotPlayer(raw: unknown): SnapshotPlayer {
     blocking: bool(o.blocking, false),
     bowCharge: Math.min(1, Math.max(0, num(o.bowCharge, 0))),
     swingT: Math.min(1, Math.max(0, num(o.swingT, 0))),
+    bossUnlock: bool(o.bossUnlock, false),
   };
 }
 
@@ -237,6 +254,11 @@ export function normalizeSnapshotPickup(raw: unknown): SnapshotPickup {
       : {};
   const kind = normalizePickupKind(o.kind);
   const goldRaw = num(o.goldAmount, 0);
+  const itemCountRaw = Math.max(0, Math.floor(num(o.itemCount, 0)));
+  const itemKind =
+    kind === "item" && itemCountRaw > 0
+      ? normalizeInventoryItemKind(o.itemKind)
+      : undefined;
   return {
     id: Math.max(0, Math.floor(num(o.id, 0))),
     kind,
@@ -244,6 +266,9 @@ export function normalizeSnapshotPickup(raw: unknown): SnapshotPickup {
     y: num(o.y, 0),
     z: num(o.z, 0),
     ...(kind === "gold" && goldRaw > 0 ? { goldAmount: Math.floor(goldRaw) } : {}),
+    ...(kind === "item" && itemKind !== undefined && itemCountRaw > 0
+      ? { itemKind, itemCount: itemCountRaw }
+      : {}),
   };
 }
 

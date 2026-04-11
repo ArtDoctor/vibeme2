@@ -18,6 +18,7 @@ import {
 } from "../combat/constants";
 import { EYE_HEIGHT } from "./constants";
 import type { SnapshotPlayer } from "../net/types";
+import { mainHandIsSword } from "../net/types";
 import type { CombatInput } from "../player/CombatInput";
 
 const DEPTH = MELEE_BOX_FORWARD_MAX - MELEE_BOX_FORWARD_MIN;
@@ -63,7 +64,7 @@ export class MeleeHitboxVisual {
   ): void {
     const mainHand = combat?.getCurrentMainHand() ?? me?.mainHand ?? "woodenSword";
     const swingT = me?.swingT ?? 0;
-    const show = mainHand === "woodenSword" && swingT > 0.001;
+    const show = mainHandIsSword(mainHand) && swingT > 0.001;
     this.root.visible = show;
     if (!show) return;
 

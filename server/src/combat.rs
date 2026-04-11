@@ -7,6 +7,8 @@ use crate::world::{EYE_HEIGHT, PLAYER_RADIUS, SPAWN_SAFE_ZONES};
 
 pub const MAX_HP: f64 = 100.0;
 pub const MAX_STAMINA: f64 = 100.0;
+/// Baseline reference (~tier-1 sword). Authoritative strikes use `items::melee_damage_for_main_hand`.
+#[allow(dead_code)]
 pub const MELEE_DAMAGE: f64 = 25.0;
 pub const ARROW_DAMAGE: f64 = 18.0;
 pub const MELEE_RANGE: f64 = 1.47;

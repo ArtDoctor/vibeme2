@@ -2,6 +2,7 @@ import { Clock, Group, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { horizontalYawFromCamera } from "../combat/constants";
 import type { MultiplayerClient } from "../net/multiplayer";
 import type { InventoryEntry, SnapshotMob, SnapshotMsg, SnapshotPlayer } from "../net/types";
+import { mainHandIsSword } from "../net/types";
 import { CombatInput } from "../player/CombatInput";
 import { FirstPersonControls } from "../player/FirstPersonControls";
 import { buildDesertScene } from "../scene/DesertScene";
@@ -16,6 +17,8 @@ import { WorldArrows } from "./WorldArrows";
 import { WorldMobs } from "./WorldMobs";
 import { CompassHud } from "./CompassHud";
 import { WorldPickups } from "./WorldPickups";
+import { nearestShopIndex, shopCatalogForSafeZoneIndex } from "../world/shops";
+import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
 
 /**
  * Owns the renderer, scene, camera, animation loop, resize handler, and dispose.
@@ -36,6 +39,8 @@ export interface GameOptions {
   localPlayerId?: string;
   /** Top compass and nearby mob indicators (multiplayer). */
   compassEl?: HTMLElement;
+  /** Buy UI (Milestone 4 shops). */
+  shopPanel?: HTMLElement;
 }
 
 export class Game {
@@ -60,6 +65,15 @@ export class Game {
   private lastMobs: readonly SnapshotMob[] = [];
   private localPlayerSnapshot: SnapshotPlayer | null = null;
   private multiplayer: MultiplayerClient | null = null;
+  private readonly shopPanel?: HTMLElement;
+  private shopOpen = false;
+  private shopAtIndex: number | null = null;
+  private readonly onDocKeydown = (e: KeyboardEvent): void => {
+    if (e.code !== "KeyE") return;
+    if (document.pointerLockElement !== this.canvas) return;
+    e.preventDefault();
+    this.toggleShopPanel();
+  };
   private animationId: number | null = null;
   private disposed = false;
 
@@ -139,8 +153,17 @@ export class Game {
       this.compassHud = null;
     }
 
+    this.shopPanel = options.shopPanel;
+    if (this.shopPanel) {
+      const closeBtn = this.shopPanel.querySelector("[data-shop-close]");
+      if (closeBtn instanceof HTMLButtonElement) {
+        closeBtn.addEventListener("click", () => this.closeShopPanel());
+      }
+    }
+
     this.resizeHandler = (): void => this.handleResize();
     window.addEventListener("resize", this.resizeHandler);
+    document.addEventListener("keydown", this.onDocKeydown);
     // Trigger once so we match whatever the initial canvas size is.
     this.handleResize();
   }
@@ -229,6 +252,9 @@ export class Game {
     const offHandEl = el.querySelector("[data-off-hand]");
     const armorEl = el.querySelector("[data-armor]");
     const packSwordEl = el.querySelector("[data-pack-woodenSword]");
+    const packIronEl = el.querySelector("[data-pack-ironSword]");
+    const packSteelEl = el.querySelector("[data-pack-steelSword]");
+    const packVanguardEl = el.querySelector("[data-pack-vanguardSword]");
     const packShieldEl = el.querySelector("[data-pack-basicShield]");
     const packBowEl = el.querySelector("[data-pack-shortBow]");
     const packArmorEl = el.querySelector("[data-pack-armor]");
@@ -240,7 +266,11 @@ export class Game {
     const offHand =
       this.combatInput != null ? this.combatInput.getCurrentOffHand() : me.offHand;
     if (mainHandEl) {
-      mainHandEl.textContent = mainHand === "shortBow" ? "short bow" : "wooden sword";
+      mainHandEl.textContent = formatMainHandLabel(mainHand);
+    }
+    const bossEl = el.querySelector("[data-boss-unlock]");
+    if (bossEl) {
+      bossEl.textContent = me.bossUnlock ? "yes" : "no";
     }
     if (offHandEl) {
       offHandEl.textContent = offHand === "basicShield" ? "basic shield" : "none";
@@ -253,14 +283,23 @@ export class Game {
       if (!(node instanceof HTMLElement)) continue;
       const slot = node.dataset.weaponSlot;
       const active =
-        (slot === "woodenSword" && mainHand === "woodenSword") ||
+        (slot === "sword" && mainHandIsSword(mainHand)) ||
         (slot === "shortBow" && mainHand === "shortBow") ||
         (slot === "basicShield" && offHand === "basicShield");
+      const owned =
+        slot === "sword"
+          ? hasAnyMeleeSword(me.inventory)
+          : inventoryCount(me.inventory, slot) > 0;
       node.classList.toggle("weapon-slot--active", active);
-      node.classList.toggle("weapon-slot--owned", inventoryCount(me.inventory, slot) > 0);
-      node.classList.toggle("weapon-slot--locked", inventoryCount(me.inventory, slot) === 0);
+      node.classList.toggle("weapon-slot--owned", owned);
+      node.classList.toggle("weapon-slot--locked", !owned);
     }
     if (packSwordEl) packSwordEl.textContent = String(inventoryCount(me.inventory, "woodenSword"));
+    if (packIronEl) packIronEl.textContent = String(inventoryCount(me.inventory, "ironSword"));
+    if (packSteelEl) packSteelEl.textContent = String(inventoryCount(me.inventory, "steelSword"));
+    if (packVanguardEl) {
+      packVanguardEl.textContent = String(inventoryCount(me.inventory, "vanguardSword"));
+    }
     if (packShieldEl) {
       packShieldEl.textContent = String(inventoryCount(me.inventory, "basicShield"));
     }
@@ -278,6 +317,73 @@ export class Game {
     const stFill = el.querySelector("[data-stamina-fill]") as HTMLElement | null;
     if (hpFill) hpFill.style.width = `${Math.max(0, Math.min(100, me.hp))}%`;
     if (stFill) stFill.style.width = `${Math.max(0, Math.min(100, me.stamina))}%`;
+
+    if (this.shopOpen && this.shopPanel && this.shopAtIndex !== null) {
+      this.renderShopOffers(me, this.shopAtIndex);
+    }
+  }
+
+  private toggleShopPanel(): void {
+    if (!this.shopPanel || !this.multiplayer || !this.localPlayerId) return;
+    if (this.shopOpen) {
+      this.closeShopPanel();
+      return;
+    }
+    const pose = this.controls.getNetworkPose();
+    const near = nearestShopIndex(pose.x, pose.z);
+    if (near === null) return;
+    this.shopAtIndex = near.index;
+    this.shopOpen = true;
+    this.shopPanel.classList.remove("hidden");
+    void document.exitPointerLock();
+    const me = this.localPlayerSnapshot;
+    if (me) this.renderShopOffers(me, this.shopAtIndex);
+  }
+
+  private closeShopPanel(): void {
+    this.shopOpen = false;
+    this.shopAtIndex = null;
+    this.shopPanel?.classList.add("hidden");
+  }
+
+  private renderShopOffers(me: SnapshotPlayer, shopIndex: number): void {
+    if (!this.shopPanel || !this.multiplayer) return;
+    const titleEl = this.shopPanel.querySelector("#shop-title");
+    if (titleEl) {
+      titleEl.textContent = isAdvancedShopSafeZoneIndex(shopIndex)
+        ? "Corner emporium"
+        : "Traveling merchant";
+    }
+    const subEl = this.shopPanel.querySelector("[data-shop-zone-hint]");
+    if (subEl) {
+      subEl.textContent = isAdvancedShopSafeZoneIndex(shopIndex)
+        ? "Premium steel and vanguard gear."
+        : "Iron weapons, shields, bows, and scout armor.";
+    }
+    const g = this.shopPanel.querySelector("[data-shop-gold]");
+    if (g) g.textContent = String(me.gold);
+    const list = this.shopPanel.querySelector("[data-shop-list]");
+    if (!(list instanceof HTMLUListElement)) return;
+    list.replaceChildren();
+    for (const offer of shopCatalogForSafeZoneIndex(shopIndex)) {
+      const li = document.createElement("li");
+      const left = document.createElement("span");
+      left.textContent = `${offer.label} — ${offer.price}g`;
+      if (offer.needsBoss) {
+        left.textContent += me.bossUnlock ? "" : " (boss)";
+      }
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Buy";
+      const canBoss = !offer.needsBoss || me.bossUnlock;
+      btn.disabled = me.gold < offer.price || !canBoss;
+      btn.addEventListener("click", () => {
+        this.multiplayer?.sendShopBuy(shopIndex, offer.sku);
+      });
+      li.appendChild(left);
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
   }
 
   start(): void {
@@ -315,18 +421,22 @@ export class Game {
         this.localThirdPersonRig.visible = true;
         const pose = this.controls.getNetworkPose();
         const c = this.combatInput;
-        updatePlayerAvatarRig(this.localThirdPersonRig, {
-          ...this.localPlayerSnapshot,
-          x: pose.x,
-          y: pose.y,
-          z: pose.z,
-          yaw: pose.yaw,
-          pitch: pose.pitch,
-          mainHand: c.getCurrentMainHand(),
-          offHand: c.getCurrentOffHand(),
-          blocking: c.getBlocking(),
-          bowCharge: c.getBowChargeVisual(),
-        });
+        updatePlayerAvatarRig(
+          this.localThirdPersonRig,
+          {
+            ...this.localPlayerSnapshot,
+            x: pose.x,
+            y: pose.y,
+            z: pose.z,
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            mainHand: c.getCurrentMainHand(),
+            offHand: c.getCurrentOffHand(),
+            blocking: c.getBlocking(),
+            bowCharge: c.getBowChargeVisual(),
+          },
+          { viewCamera: this.camera },
+        );
       } else if (this.localThirdPersonRig) {
         this.localThirdPersonRig.visible = false;
       }
@@ -348,6 +458,7 @@ export class Game {
       this.animationId = null;
     }
     window.removeEventListener("resize", this.resizeHandler);
+    document.removeEventListener("keydown", this.onDocKeydown);
     this.multiplayer?.dispose();
     this.multiplayer = null;
     this.remotePlayers?.dispose();
@@ -381,4 +492,28 @@ function inventoryCount(
 ): number {
   if (!kind) return 0;
   return inventory.find((entry) => entry.kind === kind)?.count ?? 0;
+}
+
+function hasAnyMeleeSword(inventory: readonly InventoryEntry[]): boolean {
+  return (
+    inventoryCount(inventory, "woodenSword") > 0 ||
+    inventoryCount(inventory, "ironSword") > 0 ||
+    inventoryCount(inventory, "steelSword") > 0 ||
+    inventoryCount(inventory, "vanguardSword") > 0
+  );
+}
+
+function formatMainHandLabel(k: SnapshotPlayer["mainHand"]): string {
+  switch (k) {
+    case "shortBow":
+      return "short bow";
+    case "ironSword":
+      return "iron sword";
+    case "steelSword":
+      return "steel sword";
+    case "vanguardSword":
+      return "vanguard sword";
+    default:
+      return "wooden sword";
+  }
 }

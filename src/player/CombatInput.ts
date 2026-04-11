@@ -5,6 +5,7 @@ import type {
   OffHandKind,
   SnapshotPlayer,
 } from "../net/types";
+import { mainHandIsSword } from "../net/types";
 
 export interface CombatOutbound {
   mainHand: MainHandKind;
@@ -35,6 +36,7 @@ export class CombatInput {
   private firePending = false;
   private ownedShield = false;
   private ownedBow = false;
+  private invSnapshot: readonly InventoryEntry[] = [];
 
   constructor(
     private readonly domElement: HTMLElement,
@@ -103,6 +105,7 @@ export class CombatInput {
   }
 
   syncFromSnapshot(player: SnapshotPlayer): void {
+    this.invSnapshot = player.inventory;
     this.ownedShield = hasInventoryItem(player.inventory, "basicShield");
     this.ownedBow = hasInventoryItem(player.inventory, "shortBow");
     if (!this.ownedShield) {
@@ -110,15 +113,17 @@ export class CombatInput {
       this.blocking = false;
     }
     if (!this.ownedBow && this.mainHand === "shortBow") {
-      this.mainHand = "woodenSword";
+      this.mainHand = firstOwnedSword(this.invSnapshot);
       this.bowCharging = false;
       this.bowCharge = 0;
     }
     if (this.offHand === null && player.offHand !== null) {
       this.offHand = player.offHand;
     }
-    if (!hasInventoryItem(player.inventory, "woodenSword")) {
+    if (!hasAnySword(this.invSnapshot)) {
       this.mainHand = player.mainHand;
+    } else if (!hasInventoryItem(player.inventory, this.mainHand)) {
+      this.mainHand = firstOwnedSword(this.invSnapshot);
     }
     if (player.mainHand !== this.mainHand && !this.isPointerLocked()) {
       this.mainHand = player.mainHand;
@@ -137,7 +142,7 @@ export class CombatInput {
   private readonly onMouseDown = (e: MouseEvent): void => {
     if (!this.isPointerLocked()) return;
     if (e.button === 0) {
-      if (this.mainHand === "woodenSword") {
+      if (mainHandIsSword(this.mainHand)) {
         const now = performance.now() / 1000;
         if (now - this.lastSwingSent >= SWING_COOLDOWN_S) {
           this.swingPending = true;
@@ -180,7 +185,7 @@ export class CombatInput {
     switch (code) {
       case "Digit1":
       case "Numpad1":
-        this.mainHand = "woodenSword";
+        this.cycleOwnedSword();
         this.bowCharging = false;
         this.bowCharge = 0;
         this.blocking = false;
@@ -209,8 +214,49 @@ export class CombatInput {
   }
 
   private canBlock(): boolean {
-    return this.mainHand === "woodenSword" && this.offHand === "basicShield";
+    return mainHandIsSword(this.mainHand) && this.offHand === "basicShield";
   }
+
+  /** Preference order when cycling swords (best first). */
+  private cycleOwnedSword(): void {
+    const order: MainHandKind[] = [
+      "vanguardSword",
+      "steelSword",
+      "ironSword",
+      "woodenSword",
+    ];
+    const owned = order.filter((k) =>
+      hasInventoryItem(this.invSnapshot, k),
+    );
+    if (owned.length === 0) {
+      this.mainHand = "woodenSword";
+      return;
+    }
+    const idx = owned.indexOf(this.mainHand);
+    this.mainHand = owned[(idx + 1 + owned.length) % owned.length];
+  }
+}
+
+function hasAnySword(inv: readonly InventoryEntry[]): boolean {
+  return (
+    hasInventoryItem(inv, "woodenSword") ||
+    hasInventoryItem(inv, "ironSword") ||
+    hasInventoryItem(inv, "steelSword") ||
+    hasInventoryItem(inv, "vanguardSword")
+  );
+}
+
+function firstOwnedSword(inv: readonly InventoryEntry[]): MainHandKind {
+  const order: MainHandKind[] = [
+    "vanguardSword",
+    "steelSword",
+    "ironSword",
+    "woodenSword",
+  ];
+  for (const k of order) {
+    if (hasInventoryItem(inv, k)) return k;
+  }
+  return "woodenSword";
 }
 
 function hasInventoryItem(
