@@ -1,6 +1,7 @@
 import {
   BoxGeometry,
   CanvasTexture,
+  CircleGeometry,
   Color,
   ConeGeometry,
   DirectionalLight,
@@ -9,6 +10,7 @@ import {
   Group,
   HemisphereLight,
   Mesh,
+  MeshBasicMaterial,
   MeshLambertMaterial,
   NearestFilter,
   PlaneGeometry,
@@ -34,6 +36,11 @@ import {
   TEAM_RED_SAFE_ZONE_INDEX,
 } from "../world/spawnSafeZone";
 import { isAdvancedShopSafeZoneIndex } from "../world/spawnSafeZone";
+import {
+  blueWarCampCenterXZ,
+  ENEMY_WAR_CAMP_EXCLUSION_RADIUS,
+  redWarCampCenterXZ,
+} from "../world/teamTerritory";
 import { SHOP_SAFE_ZONE_COUNT } from "../world/shops";
 import { hash2 } from "../utils/math";
 import {
@@ -71,6 +78,32 @@ export interface DesertWorld {
    */
   spawnSafeZoneAabb: SpawnSafeZoneAabb;
   pointInSpawnSafeZone(x: number, z: number): boolean;
+}
+
+/** Semi-transparent disks — red/blue war-camp exclusion (server `extrude_from_enemy_war_camps`). */
+function addWarCampTerritoryDisks(
+  scene: Scene,
+  sampleGround: (x: number, z: number) => number,
+): void {
+  const r = ENEMY_WAR_CAMP_EXCLUSION_RADIUS;
+  const geom = new CircleGeometry(r, 56);
+  const addDisk = (cx: number, cz: number, color: number): void => {
+    const mat = new MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    });
+    const m = new Mesh(geom, mat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(cx, sampleGround(cx, cz) + 0.055, cz);
+    m.renderOrder = -5;
+    scene.add(m);
+  };
+  const rc = redWarCampCenterXZ();
+  const bc = blueWarCampCenterXZ();
+  addDisk(rc.x, rc.z, 0xcc4444);
+  addDisk(bc.x, bc.z, 0x4466cc);
 }
 
 const SAND_COLOR = 0xd7b56d;
@@ -126,6 +159,8 @@ export function buildDesertScene(scene: Scene): DesertWorld {
   );
   ground.name = "desert-ground";
   scene.add(ground);
+
+  addWarCampTerritoryDisks(scene, sampleTerrainHeight);
 
   // ---- Mountains and rocks ------------------------------------------------
   // Procedurally placed using a deterministic hash so the world is the same

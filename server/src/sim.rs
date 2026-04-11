@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::chat_filter::filter_profanity;
 use crate::combat::{
     arrow_hits_player, damage_after_armor, damage_after_shield_melee,
     damage_after_shield_ranged, frontal_dot, integrate_arrow, melee_hit_valid,
@@ -26,8 +28,9 @@ use crate::mobs::{
 use crate::team::Team;
 use crate::validate::clamp_claimed_position;
 use crate::world::{
-    is_team_war_camp_zone_index, safe_zone_index_at, sample_terrain_height, safe_zone_shop_spot_xz,
-    AabbCollider, EYE_HEIGHT, SPAWN_SAFE_ZONES,
+    extrude_from_enemy_war_camps, is_team_war_camp_zone_index, resolve_colliders, safe_zone_index_at,
+    sample_terrain_height, safe_zone_shop_spot_xz, snap_to_ground, AabbCollider, EYE_HEIGHT,
+    SPAWN_SAFE_ZONES,
 };
 
 const PLAYER_VISIBILITY_RADIUS: f64 = 65.0;
@@ -37,6 +40,18 @@ const DAMAGE_EVENT_VISIBILITY_RADIUS: f64 = 80.0;
 const PICKUP_VISIBILITY_RADIUS: f64 = 78.0;
 const PICKUP_RADIUS: f64 = 1.25;
 const PICKUP_RESPAWN_S: f64 = 4.0;
+/// Proximity radius for hearing chat (XZ meters); smaller than player visibility.
+const CHAT_PROXIMITY_RADIUS: f64 = 36.0;
+const CHAT_MAX_CHARS: usize = 160;
+const CHAT_TTL: Duration = Duration::from_secs(60);
+const CHAT_MIN_INTERVAL: Duration = Duration::from_millis(900);
+
+fn unix_ms_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// One stall per PvP-safe courtyard — indices match client `ALL_SPAWN_SAFE_ZONE_AABBS` / `safe_zone_shop_spot_xz`.
 const SHOP_INTERACT_RADIUS: f64 = 3.85;
@@ -271,6 +286,20 @@ pub struct SnapshotOut {
     damage_floats: Vec<DamageFloatSnapshot>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     deaths: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    chat: Vec<ChatSnapshot>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatSnapshot {
+    id: String,
+    sender_id: String,
+    sender_nickname: String,
+    text: String,
+    x: f64,
+    z: f64,
+    sent_at_unix_ms: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -364,6 +393,17 @@ pub struct SnapshotFrame {
     mob_index: SpatialIndex,
     damage_index: SpatialIndex,
     damage_by_source: HashMap<String, Vec<usize>>,
+    chat_messages: Vec<ChatSnapshot>,
+}
+
+struct StoredChatMessage {
+    id: u64,
+    sender_id: Uuid,
+    sender_nickname: String,
+    text: String,
+    x: f64,
+    z: f64,
+    sent_at_unix_ms: u64,
 }
 
 /// Returns the authoritative game world plus connected-player/session bookkeeping.
@@ -385,6 +425,9 @@ pub struct Simulation {
     loot_salt: u64,
     damage_floats: Vec<DamageFloatSnapshot>,
     deaths_this_tick: Vec<Uuid>,
+    chat_log: Vec<StoredChatMessage>,
+    next_chat_id: u64,
+    last_chat_at: HashMap<Uuid, Instant>,
 }
 
 /// Returns whether the raw nickname is allowed for a fresh join.
@@ -399,24 +442,28 @@ pub fn valid_nickname(raw: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn assign_join_team(existing: &HashMap<Uuid, Player>) -> Team {
-    let mut r = 0_u32;
-    let mut b = 0_u32;
-    let mut n = 0_u32;
-    for p in existing.values() {
+/// When `red_count - blue_count` reaches this gap, joining the larger team is blocked.
+const MASSIVE_TEAM_IMBALANCE: i32 = 4;
+
+fn can_pick_team(players: &HashMap<Uuid, Player>, team: Team) -> Result<(), String> {
+    let mut r = 0_i32;
+    let mut b = 0_i32;
+    for p in players.values() {
         match p.team {
             Team::Red => r += 1,
             Team::Blue => b += 1,
-            Team::Neutral => n += 1,
+            Team::Neutral => {}
         }
     }
-    let m = r.min(b).min(n);
-    if r == m {
-        Team::Red
-    } else if b == m {
-        Team::Blue
-    } else {
-        Team::Neutral
+    let diff = r - b;
+    match team {
+        Team::Red if diff >= MASSIVE_TEAM_IMBALANCE => Err(
+            "Too many players on Red already. Choose Blue or Neutral.".to_string(),
+        ),
+        Team::Blue if -diff >= MASSIVE_TEAM_IMBALANCE => Err(
+            "Too many players on Blue already. Choose Red or Neutral.".to_string(),
+        ),
+        _ => Ok(()),
     }
 }
 
@@ -644,6 +691,7 @@ impl SnapshotFrame {
                     mobs: Vec::new(),
                     damage_floats: self.damage_floats.clone(),
                     deaths: self.deaths.clone(),
+                    chat: Vec::new(),
                 };
             }
         };
@@ -712,6 +760,21 @@ impl SnapshotFrame {
             .cloned()
             .collect();
 
+        let chat: Vec<ChatSnapshot> = self
+            .chat_messages
+            .iter()
+            .filter(|c| {
+                within_radius_xz(
+                    viewer_x,
+                    viewer_z,
+                    c.x,
+                    c.z,
+                    CHAT_PROXIMITY_RADIUS,
+                )
+            })
+            .cloned()
+            .collect();
+
         SnapshotOut {
             msg_type: "snapshot",
             tick: self.tick,
@@ -721,6 +784,7 @@ impl SnapshotFrame {
             mobs,
             damage_floats,
             deaths: self.deaths.clone(),
+            chat,
         }
     }
 }
@@ -758,6 +822,9 @@ impl Simulation {
             loot_salt: 1,
             damage_floats: Vec::new(),
             deaths_this_tick: Vec::new(),
+            chat_log: Vec::new(),
+            next_chat_id: 1,
+            last_chat_at: HashMap::new(),
         };
         sim.refill_pickups();
         sim
@@ -765,15 +832,16 @@ impl Simulation {
 
     /// Returns a new player id and session token for a successful join.
     /// Limits: nick uniqueness is only enforced for players connected to this process.
-    pub fn join_player(&mut self, nickname: String) -> Result<(Uuid, Uuid, Team), String> {
+    pub fn join_player(&mut self, nickname: String, team: Team) -> Result<(Uuid, Uuid, Team), String> {
         let key = nickname.to_lowercase();
         if self.nick_to_id.contains_key(&key) {
             return Err("That nickname is already in use.".to_string());
         }
 
+        can_pick_team(&self.players, team)?;
+
         let id = Uuid::new_v4();
         let session = Uuid::new_v4();
-        let team = assign_join_team(&self.players);
         self.players.insert(id, Player::new(nickname.clone(), session, team));
         self.nick_to_id.insert(key, id);
         self.sessions.insert(session, id);
@@ -783,6 +851,50 @@ impl Simulation {
     /// Returns the persistent team for a connected player (reconnect / welcome payload).
     pub fn player_team(&self, id: Uuid) -> Option<Team> {
         self.players.get(&id).map(|p| p.team)
+    }
+
+    fn prune_chat_messages(&mut self) {
+        let now = unix_ms_now();
+        let ttl_ms = CHAT_TTL.as_millis() as u64;
+        self.chat_log
+            .retain(|m| now.saturating_sub(m.sent_at_unix_ms) < ttl_ms);
+    }
+
+    /// Records a chat line at the sender's authoritative position; proximity filtering happens in `SnapshotFrame::for_viewer`.
+    /// Limits: rate-limited; text is filtered for profanity and capped at `CHAT_MAX_CHARS` Unicode scalars.
+    pub fn submit_chat(&mut self, player_id: Uuid, raw: String) -> Result<(), String> {
+        let now_ins = Instant::now();
+        if let Some(prev) = self.last_chat_at.get(&player_id) {
+            if now_ins.duration_since(*prev) < CHAT_MIN_INTERVAL {
+                return Err("Slow down.".to_string());
+            }
+        }
+        let Some(player) = self.players.get(&player_id) else {
+            return Err("Player not found.".to_string());
+        };
+        let stripped: String = raw.chars().filter(|c| !c.is_control()).collect();
+        let trimmed = stripped.trim();
+        if trimmed.is_empty() {
+            return Err("Empty message.".to_string());
+        }
+        if trimmed.chars().count() > CHAT_MAX_CHARS {
+            return Err("Message too long.".to_string());
+        }
+        let text = filter_profanity(trimmed);
+        let sent_at_unix_ms = unix_ms_now();
+        let id = self.next_chat_id;
+        self.next_chat_id = self.next_chat_id.wrapping_add(1);
+        self.chat_log.push(StoredChatMessage {
+            id,
+            sender_id: player_id,
+            sender_nickname: player.nickname.clone(),
+            text,
+            x: player.x,
+            z: player.z,
+            sent_at_unix_ms,
+        });
+        self.last_chat_at.insert(player_id, now_ins);
+        Ok(())
     }
 
     fn position_in_mixed_team_truce(&self, x: f64, z: f64) -> bool {
@@ -931,7 +1043,8 @@ impl Simulation {
                 return false;
             };
             let prev = (player.x, player.y, player.z);
-            let (next_x, next_y, next_z) = clamp_claimed_position(
+            let flying = input.creative && input.flying;
+            let (mut next_x, mut next_y, mut next_z) = clamp_claimed_position(
                 prev,
                 (input.x, input.y, input.z),
                 input_dt_secs,
@@ -940,6 +1053,11 @@ impl Simulation {
                 input.flying,
                 input.sprinting,
             );
+            extrude_from_enemy_war_camps(player.team, &mut next_x, &mut next_z);
+            resolve_colliders(&mut next_x, &mut next_y, &mut next_z, colliders);
+            if !flying {
+                snap_to_ground(&mut next_y, next_x, next_z);
+            }
             player.x = next_x;
             player.y = next_y;
             player.z = next_z;
@@ -977,6 +1095,7 @@ impl Simulation {
     /// Limits: large catch-up steps are clamped to 120 ms; the simulation is tuned for frequent fixed-ish ticks, not long pauses.
     pub fn tick(&mut self, dt: f64, world_tick: u64, colliders: &[AabbCollider]) {
         let dt = dt.clamp(0.0, 0.12);
+        self.prune_chat_messages();
         for player in self.players.values_mut() {
             player.stamina = (player.stamina + STAMINA_REGEN_PER_S * dt).min(MAX_STAMINA);
             if player.can_block_with_shield() {
@@ -1173,6 +1292,20 @@ impl Simulation {
                 .push(index);
         }
 
+        let chat_messages: Vec<ChatSnapshot> = self
+            .chat_log
+            .iter()
+            .map(|m| ChatSnapshot {
+                id: m.id.to_string(),
+                sender_id: m.sender_id.to_string(),
+                sender_nickname: m.sender_nickname.clone(),
+                text: m.text.clone(),
+                x: m.x,
+                z: m.z,
+                sent_at_unix_ms: m.sent_at_unix_ms,
+            })
+            .collect();
+
         SnapshotFrame {
             tick,
             players,
@@ -1191,6 +1324,7 @@ impl Simulation {
                 &damage_positions,
             ),
             damage_by_source,
+            chat_messages,
         }
     }
 
@@ -1783,7 +1917,9 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) =
+            sim.join_player("hero".to_string(), Team::Red)
+                .expect("join succeeds");
         {
             let player = sim.players.get_mut(&player_id).expect("player exists");
             player.x = 12.0;
@@ -1834,10 +1970,14 @@ mod tests {
             spawn_world_bosses: false,
         });
         let (viewer_id, _, _) = sim
-            .join_player("viewer".to_string())
+            .join_player("viewer".to_string(), Team::Red)
             .expect("join succeeds");
-        let (near_id, _, _) = sim.join_player("near".to_string()).expect("join succeeds");
-        let (far_id, _, _) = sim.join_player("far".to_string()).expect("join succeeds");
+        let (near_id, _, _) = sim
+            .join_player("near".to_string(), Team::Blue)
+            .expect("join succeeds");
+        let (far_id, _, _) = sim
+            .join_player("far".to_string(), Team::Neutral)
+            .expect("join succeeds");
 
         {
             let viewer = sim.players.get_mut(&viewer_id).expect("viewer exists");
@@ -1937,7 +2077,9 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) =
+            sim.join_player("hero".to_string(), Team::Red)
+                .expect("join succeeds");
         let player = sim.players.get_mut(&player_id).expect("player exists");
         player.gold = 88;
         player.inventory.add(InventoryItemKind::BasicShield, 1);
@@ -2038,7 +2180,9 @@ mod tests {
             auto_spawn_creeps: false,
             spawn_world_bosses: false,
         });
-        let (player_id, _, _) = sim.join_player("hero".to_string()).expect("join succeeds");
+        let (player_id, _, _) =
+            sim.join_player("hero".to_string(), Team::Red)
+                .expect("join succeeds");
         let input = InputCommand {
             x: 0.0,
             y: sample_terrain_height(0.0, 0.0) + EYE_HEIGHT,
@@ -2072,9 +2216,11 @@ mod tests {
             spawn_world_bosses: false,
         });
         let (attacker_id, _, _) = sim
-            .join_player("attacker".to_string())
+            .join_player("attacker".to_string(), Team::Red)
             .expect("join succeeds");
-        let (victim_id, _, _) = sim.join_player("victim".to_string()).expect("join succeeds");
+        let (victim_id, _, _) = sim
+            .join_player("victim".to_string(), Team::Blue)
+            .expect("join succeeds");
 
         {
             let attacker = sim.players.get_mut(&attacker_id).expect("attacker exists");
@@ -2099,5 +2245,40 @@ mod tests {
         assert!(victim.hp < MAX_HP);
         let swing = crate::items::melee_damage_for_main_hand(MainHandKind::WoodenSword);
         assert!(victim.hp > MAX_HP - swing);
+    }
+
+    #[test]
+    fn chat_only_goes_to_players_in_range() {
+        let mut sim = Simulation::new(SimConfig {
+            spawn_training_dummy: false,
+            auto_spawn_creeps: false,
+            spawn_world_bosses: false,
+        });
+        let (near_id, _, _) = sim
+            .join_player("near".to_string(), Team::Red)
+            .expect("join");
+        let (far_id, _, _) = sim
+            .join_player("far".to_string(), Team::Blue)
+            .expect("join");
+        {
+            let p = sim.players.get_mut(&near_id).expect("near");
+            p.x = 0.0;
+            p.z = 0.0;
+            p.y = sample_terrain_height(0.0, 0.0) + EYE_HEIGHT;
+        }
+        {
+            let p = sim.players.get_mut(&far_id).expect("far");
+            p.x = 120.0;
+            p.z = 0.0;
+            p.y = sample_terrain_height(120.0, 0.0) + EYE_HEIGHT;
+        }
+        assert!(sim
+            .submit_chat(near_id, "hello desert".to_string())
+            .is_ok());
+        let frame = sim.build_snapshot_frame(1);
+        let v_near = frame.for_viewer(near_id);
+        let v_far = frame.for_viewer(far_id);
+        assert!(!v_near.chat.is_empty());
+        assert!(v_far.chat.is_empty());
     }
 }

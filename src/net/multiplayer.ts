@@ -1,4 +1,4 @@
-import type { SnapshotMsg, WelcomeMsg } from "./types";
+import type { PlayerTeam, SnapshotMsg, WelcomeMsg } from "./types";
 import { normalizeSnapshotMsg } from "./snapshotNormalize";
 
 const DEFAULT_SESSION_KEY = "solis-gladius.session";
@@ -12,10 +12,14 @@ export interface MultiplayerOptions {
   nickname: string;
   /** Stored session UUID for reconnect; `null` for a fresh join. */
   session: string | null;
+  /** Required when `session` is `null` — must match server `team_from_join_str`. */
+  team?: PlayerTeam;
 }
 
 export class MultiplayerClient {
   readonly tickHz: number;
+  /** Server-assigned faction (welcome message). */
+  readonly team: PlayerTeam;
   private readonly ws: WebSocket;
   private readonly localPlayerId: string;
   private readonly sessionKey: string;
@@ -46,6 +50,7 @@ export class MultiplayerClient {
   ) {
     this.ws = ws;
     this.localPlayerId = welcome.playerId;
+    this.team = welcome.team;
     this.tickHz = welcome.tickHz;
     this.sessionKey = welcome.sessionStorageKey ?? DEFAULT_SESSION_KEY;
     this.onSnapshot = onSnapshot;
@@ -101,7 +106,11 @@ export class MultiplayerClient {
       ws.addEventListener("open", () => {
         const payload =
           options.session === null
-            ? { type: "join" as const, nickname: options.nickname }
+            ? {
+                type: "join" as const,
+                nickname: options.nickname,
+                team: options.team,
+              }
             : {
                 type: "join" as const,
                 nickname: options.nickname,
@@ -207,6 +216,12 @@ export class MultiplayerClient {
         sell: { kind, count },
       }),
     );
+  }
+
+  /** Proximity chat; server validates rate, length, and filters profanity. */
+  sendChat(text: string): void {
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({ type: "chat", text }));
   }
 
   dispose(): void {

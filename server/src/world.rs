@@ -1,6 +1,8 @@
 //! Deterministic world data shared with the TypeScript client (`scene/terrain.ts`,
 //! `scene/DesertScene.ts`). Colliders must stay in sync — see `docs/ARCHITECTURE.md`.
 
+use crate::team::Team;
+
 pub const TERRAIN_HALF_SIZE: f64 = 600.0;
 /// Half-extent of each PvP-safe courtyard (matches `SPAWN_SAFE_ZONE_HALF` in `spawnSafeZone.ts`).
 pub const SPAWN_SAFE_ZONE_HALF: f64 = 5.0;
@@ -51,6 +53,59 @@ pub fn safe_zone_index_at(x: f64, z: f64) -> Option<usize> {
 #[inline]
 pub fn is_team_war_camp_zone_index(idx: usize) -> bool {
     matches!(idx, i if i == TEAM_RED_SAFE_ZONE_INDEX || i == TEAM_BLUE_SAFE_ZONE_INDEX)
+}
+
+/// Disk radius around each enemy war-camp center that the opposing team cannot enter (matches client tint).
+pub const ENEMY_WAR_CAMP_EXCLUSION_RADIUS: f64 = 22.0;
+
+#[inline]
+pub fn red_war_camp_center_xz() -> (f64, f64) {
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    (0.0, e)
+}
+
+#[inline]
+pub fn blue_war_camp_center_xz() -> (f64, f64) {
+    let e = TERRAIN_HALF_SIZE - SAFE_ZONE_EDGE_INSET;
+    (0.0, -e)
+}
+
+/// Pushes `(x, z)` to the disk boundary if inside the enemy team's home territory.
+pub fn extrude_from_enemy_war_camps(team: Team, x: &mut f64, z: &mut f64) {
+    let r = ENEMY_WAR_CAMP_EXCLUSION_RADIUS;
+    match team {
+        Team::Neutral => {}
+        Team::Red => {
+            let (cx, cz) = blue_war_camp_center_xz();
+            extrude_from_disk(x, z, cx, cz, r);
+        }
+        Team::Blue => {
+            let (cx, cz) = red_war_camp_center_xz();
+            extrude_from_disk(x, z, cx, cz, r);
+        }
+    }
+}
+
+fn extrude_from_disk(x: &mut f64, z: &mut f64, cx: f64, cz: f64, r: f64) {
+    let dx = *x - cx;
+    let dz = *z - cz;
+    let d2 = dx * dx + dz * dz;
+    let r2 = r * r;
+    if d2 > r2 {
+        return;
+    }
+    if d2 < 1e-18 {
+        let to_ox = -cx;
+        let to_oz = -cz;
+        let len = (to_ox * to_ox + to_oz * to_oz).sqrt().max(1e-9);
+        *x = cx + (to_ox / len) * r;
+        *z = cz + (to_oz / len) * r;
+        return;
+    }
+    let d = d2.sqrt();
+    let s = r / d;
+    *x = cx + dx * s;
+    *z = cz + dz * s;
 }
 
 /// Offset from courtyard center toward the map edge — matches `SHOP_SERVICE_SPOT_OFFSET` in `shops.ts`.
@@ -483,5 +538,20 @@ mod tests {
         assert!(is_team_war_camp_zone_index(TEAM_BLUE_SAFE_ZONE_INDEX));
         assert!(!is_team_war_camp_zone_index(0));
         assert!(!is_team_war_camp_zone_index(TEAM_NEUTRAL_SAFE_ZONE_INDEX));
+    }
+
+    #[test]
+    fn extrude_pushes_red_out_of_blue_disk() {
+        let (cx, cz) = blue_war_camp_center_xz();
+        let mut x = cx;
+        let mut z = cz;
+        extrude_from_enemy_war_camps(crate::team::Team::Red, &mut x, &mut z);
+        let dx = x - cx;
+        let dz = z - cz;
+        let d = (dx * dx + dz * dz).sqrt();
+        assert!(
+            (d - ENEMY_WAR_CAMP_EXCLUSION_RADIUS).abs() < 1e-6,
+            "expected on boundary, got d={d}"
+        );
     }
 }

@@ -17,3 +17,17 @@ impl Team {
         self == other
     }
 }
+
+/// Parses client join `team` strings (`red` / `blue` / `neutral`, case-insensitive).
+pub fn team_from_join_str(raw: &str) -> Option<Team> {
+    let s = raw.trim();
+    if s.eq_ignore_ascii_case("red") {
+        Some(Team::Red)
+    } else if s.eq_ignore_ascii_case("blue") {
+        Some(Team::Blue)
+    } else if s.eq_ignore_ascii_case("neutral") {
+        Some(Team::Neutral)
+    } else {
+        None
+    }
+}

@@ -44,6 +44,23 @@
           autocomplete="username"
           placeholder="e.g. Marcus, desert_hawk"
         />
+        <fieldset class="join-team-fieldset">
+          <legend class="join-team-legend">Faction</legend>
+          <div class="join-team-options" role="radiogroup" aria-label="Team">
+            <label class="join-team-label join-team-label--red">
+              <input type="radio" name="join-team" value="red" />
+              Red
+            </label>
+            <label class="join-team-label join-team-label--blue">
+              <input type="radio" name="join-team" value="blue" />
+              Blue
+            </label>
+            <label class="join-team-label join-team-label--neutral">
+              <input type="radio" name="join-team" value="neutral" checked />
+              Neutral
+            </label>
+          </div>
+        </fieldset>
         <button id="join-submit" type="button" class="join-submit">Enter the Arena</button>
         <p id="join-error" class="join-error hidden" role="alert"></p>
       </div>
@@ -155,6 +172,22 @@
         <button type="button" class="shop-close" data-shop-close>Close</button>
       </div>
 
+      <!-- ── PROXIMITY CHAT ── -->
+      <div id="hud-chat" class="hud-chat" aria-live="polite">
+        <div class="hud-chat-log" data-chat-log></div>
+        <div class="hud-chat-input-wrap hidden" data-chat-input-wrap>
+          <input
+            type="text"
+            class="hud-chat-input"
+            data-chat-input
+            maxlength="160"
+            placeholder="Say something… (Enter to send, Esc to close)"
+            autocomplete="off"
+            spellcheck="true"
+          />
+        </div>
+      </div>
+
       <!-- ── BOTTOM HINT ── -->
       <div id="hud" class="hud" aria-live="polite">
         <p>
@@ -163,6 +196,7 @@
           <kbd>Shift</kbd> sprint &nbsp;·&nbsp;
           <kbd>Space</kbd> jump &nbsp;·&nbsp;
           <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> loadout &nbsp;·&nbsp;
+          <kbd>T</kbd> chat &nbsp;·&nbsp;
           <kbd>E</kbd> shop &nbsp;·&nbsp;
           <kbd>LMB</kbd> attack &nbsp;·&nbsp;
           <kbd>RMB</kbd> block &nbsp;·&nbsp;

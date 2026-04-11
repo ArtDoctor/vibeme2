@@ -1,3 +1,4 @@
+mod chat_filter;
 mod combat;
 mod interest;
 mod items;
@@ -27,7 +28,7 @@ use uuid::Uuid;
 use crate::items::inventory_item_kind_from_client;
 use crate::protocol::{ClientMsg, JoinErrorOut, WelcomeOut};
 use crate::sim::{valid_nickname, InputCommand, SimConfig, Simulation, SnapshotFrame};
-use crate::team::Team;
+use crate::team::{team_from_join_str, Team};
 use crate::world::{build_colliders, AabbCollider};
 
 const TICK_HZ: u32 = 30;
@@ -130,13 +131,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     };
 
     let (player_id, session_token, team) = match msg {
-        ClientMsg::Join { nickname, session } => {
-            match resolve_join(&sim, &mut write_half, nickname, session).await {
+        ClientMsg::Join {
+            nickname,
+            session,
+            team: requested_team,
+        } => {
+            match resolve_join(&sim, &mut write_half, nickname, session, requested_team).await {
                 Some(join) => join,
                 None => return,
             }
         }
-        ClientMsg::Input { .. } | ClientMsg::Shop { .. } => {
+        ClientMsg::Input { .. } | ClientMsg::Shop { .. } | ClientMsg::Chat { .. } => {
             send_join_error(&mut write_half, "First message must be a join.").await;
             let _ = write_half.close().await;
             return;
@@ -232,6 +237,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     }
                                 }
                             }
+                            ClientMsg::Chat { text } => {
+                                let mut simulation = sim.write().await;
+                                let _ = simulation.submit_chat(player_id, text);
+                            }
                             ClientMsg::Join { .. } => {}
                         }
                     }
@@ -280,6 +289,7 @@ async fn resolve_join(
     write_half: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     nickname: String,
     session: Option<String>,
+    requested_team: Option<String>,
 ) -> Option<(Uuid, Uuid, Team)> {
     if let Some(raw_session) = session {
         return resolve_session_join(sim, write_half, raw_session).await;
@@ -294,8 +304,24 @@ async fn resolve_join(
         return None;
     }
 
+    let Some(raw) = requested_team.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        send_join_error(
+            write_half,
+            "Pick a team: red, blue, or neutral.",
+        )
+        .await;
+        let _ = write_half.close().await;
+        return None;
+    };
+    let Some(team) = team_from_join_str(raw) else {
+        send_join_error(write_half, "Unknown team. Use red, blue, or neutral.")
+            .await;
+        let _ = write_half.close().await;
+        return None;
+    };
+
     let mut simulation = sim.write().await;
-    match simulation.join_player(nickname.trim().to_string()) {
+    match simulation.join_player(nickname.trim().to_string(), team) {
         Ok(join) => Some(join),
         Err(message) => {
             send_join_error(write_half, &message).await;

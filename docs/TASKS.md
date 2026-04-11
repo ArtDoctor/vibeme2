@@ -157,6 +157,10 @@ runs; server is authoritative; client keeps only a session token in
 - [~] **State authority**: server is authoritative for **player positions**
       (validated each input). Inventory, gold, HP, mobs — still todo
       (Milestones 2–4).
+- [x] **Proximity chat**: `T` opens compose (pointer unlock); server stores lines
+      for 60s, filters profanity, rate-limits sends, and includes messages in
+      snapshots only for listeners within ~36m (XZ) of the speaker. Client shows
+      toasts ~15s; compose shows full recent history (`Esc` / `T` to close).
 - [x] **Movement validation**: Rust uses the same terrain function + collider
       list as `DesertScene` / `terrain.ts`, clamps speed, resolves AABBs, snaps
       ground (see `server/src/world.rs`, `server/src/validate.rs`).
@@ -176,15 +180,10 @@ runs; server is authoritative; client keeps only a session token in
       there should push players to **move fast** or **group up**; solo slow
       play in the open should be punishing. Server rules for aggro, spawn
       density, and boundaries tie into Milestone 1.5 safe checks and Milestone 3 mobs. Make the mobs by default follow the player, but if the players are in safe zone, mobs should keep distances from safe zones.
-- [ ] Sound effects (WebAudio, no external lib).
-- [ ] **Global boss-kill TTS**: when someone lands the **final blow** on a huge boss,
-      play a text-to-speech line for everyone: their nickname plus a short joke or riff
-      on that nickname (server-triggered in MP).
 - [ ] **Juice and feedback**: view bob, hit/blood VFX, blood or vignette on screen edges
       when hurt, clear animations for weapon switches, enemy attacks, and other actions —
       every action should read with motion and effects.
 - [ ] Minimap.
-- [ ] Daily reset / world events.
 
 ---
 
@@ -210,6 +209,16 @@ runs; server is authoritative; client keeps only a session token in
       Current state: per-client views use a per-tick spatial grid plus distance
       filtering, so snapshot fan-out no longer scans every entity list linearly.
       True region ownership, more advanced interest rules, and compression are still todo.
+
+---
+
+## Milestone 9 — Audio, world cadence, and boss announcements
+
+- [ ] Sound effects (WebAudio, no external lib).
+- [ ] Daily reset / world events.
+- [ ] **Global boss-kill TTS**: when someone lands the **final blow** on a huge boss,
+      play a text-to-speech line for everyone: their nickname plus a short joke or riff
+      on that nickname (server-triggered in MP).
 
 ---
 

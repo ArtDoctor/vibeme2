@@ -19,6 +19,9 @@ pub enum ClientMsg {
         nickname: String,
         #[serde(default)]
         session: Option<String>,
+        /// Required for a fresh join (`session` absent): `red`, `blue`, or `neutral`.
+        #[serde(default)]
+        team: Option<String>,
     },
     #[serde(rename = "shop")]
     Shop {
@@ -28,6 +31,8 @@ pub enum ClientMsg {
         #[serde(default)]
         sell: Option<ShopSellIn>,
     },
+    #[serde(rename = "chat")]
+    Chat { text: String },
     #[serde(rename = "input")]
     Input {
         #[serde(default, rename = "seq")]

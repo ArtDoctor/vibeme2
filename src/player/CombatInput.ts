@@ -37,6 +37,7 @@ export class CombatInput {
   private ownedShield = false;
   private ownedBow = false;
   private invSnapshot: readonly InventoryEntry[] = [];
+  private chatSuppressed = false;
 
   constructor(
     private readonly domElement: HTMLElement,
@@ -50,8 +51,18 @@ export class CombatInput {
     document.addEventListener("keydown", this.onKeyDown);
   }
 
+  setChatSuppressed(suppressed: boolean): void {
+    this.chatSuppressed = suppressed;
+    if (suppressed) {
+      this.blocking = false;
+      this.bowCharging = false;
+      this.bowCharge = 0;
+    }
+  }
+
   /** Call each frame before networking send; `dt` is seconds. */
   update(dt: number): void {
+    if (this.chatSuppressed) return;
     const locked = this.isPointerLocked();
     if (!locked) {
       this.blocking = false;
@@ -140,6 +151,7 @@ export class CombatInput {
   }
 
   private readonly onMouseDown = (e: MouseEvent): void => {
+    if (this.chatSuppressed) return;
     if (!this.isPointerLocked()) return;
     if (e.button === 0) {
       if (mainHandIsSword(this.mainHand)) {
@@ -159,6 +171,7 @@ export class CombatInput {
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
+    if (this.chatSuppressed) return;
     if (e.button === 0 && this.mainHand === "shortBow" && this.bowCharging) {
       this.bowCharging = false;
       if (this.bowCharge >= BOW_MIN_CHARGE) {
@@ -173,6 +186,7 @@ export class CombatInput {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (this.chatSuppressed) return;
     if (this.applyWeaponKeyCode(e.code)) {
       e.preventDefault();
       return;

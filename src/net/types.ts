@@ -133,6 +133,17 @@ export interface DamageFloatEvent {
   amount: number;
 }
 
+/** Proximity chat line from the authoritative server (filtered, TTL’d). */
+export interface SnapshotChatMessage {
+  id: string;
+  senderId: string;
+  senderNickname: string;
+  text: string;
+  x: number;
+  z: number;
+  sentAtUnixMs: number;
+}
+
 export interface SnapshotMsg {
   type: "snapshot";
   tick: number;
@@ -147,4 +158,6 @@ export interface SnapshotMsg {
   damageFloats?: DamageFloatEvent[];
   /** Player ids who died this tick (server respawns immediately; used for UI). */
   deaths?: readonly string[];
+  /** Omitted when no chat lines in range this tick. */
+  chat?: readonly SnapshotChatMessage[];
 }

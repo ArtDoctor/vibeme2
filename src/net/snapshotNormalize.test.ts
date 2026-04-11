@@ -69,6 +69,37 @@ describe("normalizeSnapshotMsg", () => {
     expect(m.deaths).toEqual(["abc", "42"]);
   });
 
+  it("parses chat lines when present", () => {
+    const m = normalizeSnapshotMsg({
+      type: "snapshot",
+      tick: 3,
+      players: [],
+      mobs: [],
+      chat: [
+        {
+          id: "7",
+          senderId: "u1",
+          senderNickname: "A",
+          text: "hi",
+          x: 1,
+          z: 2,
+          sentAtUnixMs: 1700000000000,
+        },
+      ],
+    });
+    expect(m.chat).toEqual([
+      {
+        id: "7",
+        senderId: "u1",
+        senderNickname: "A",
+        text: "hi",
+        x: 1,
+        z: 2,
+        sentAtUnixMs: 1700000000000,
+      },
+    ]);
+  });
+
   it("normalizes pickup snapshots when present", () => {
     const m = normalizeSnapshotMsg({
       type: "snapshot",

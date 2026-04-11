@@ -8,6 +8,7 @@ import type {
   ArmorPieceKind,
   ArmorSlots,
   DamageFloatEvent,
+  SnapshotChatMessage,
   InventoryEntry,
   InventoryItemKind,
   MainHandKind,
@@ -226,6 +227,22 @@ export function normalizeSnapshotMob(raw: unknown): SnapshotMob {
   };
 }
 
+export function normalizeSnapshotChatMessage(raw: unknown): SnapshotChatMessage {
+  const o =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    id: str(o.id, ""),
+    senderId: str(o.senderId, ""),
+    senderNickname: str(o.senderNickname, ""),
+    text: str(o.text, ""),
+    x: num(o.x, 0),
+    z: num(o.z, 0),
+    sentAtUnixMs: Math.max(0, Math.floor(num(o.sentAtUnixMs, 0))),
+  };
+}
+
 export function normalizeDamageFloatEvent(raw: unknown): DamageFloatEvent {
   const o =
     raw !== null && typeof raw === "object"
@@ -319,6 +336,11 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
     ? deathsIn.map((id) => str(id, "")).filter((s) => s.length > 0)
     : undefined;
 
+  const chatIn = o.chat;
+  const chat: SnapshotChatMessage[] | undefined = Array.isArray(chatIn)
+    ? chatIn.map(normalizeSnapshotChatMessage).filter((c) => c.id.length > 0)
+    : undefined;
+
   return {
     type: "snapshot",
     tick,
@@ -330,5 +352,6 @@ export function normalizeSnapshotMsg(raw: unknown): SnapshotMsg {
       ? { damageFloats }
       : {}),
     ...(deaths !== undefined && deaths.length > 0 ? { deaths } : {}),
+    ...(chat !== undefined && chat.length > 0 ? { chat } : {}),
   };
 }

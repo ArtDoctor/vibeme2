@@ -32,9 +32,9 @@ type LayoutTriple = {
 
 /** Layout for weapons rigged to a third-person avatar (see RemotePlayers). */
 export const WEAPON_LAYOUT_THIRD: LayoutTriple = {
-  sword: { pos: [0.38, 0.75, -0.12], rotY: -0.35 },
-  shield: { pos: [-0.54, 0.2, -0.05], rotY: 0.45 },
-  bow: { pos: [0.35, 0.78, -0.1], rotY: -0.2 },
+  sword: { pos: [0.38, 0.75, 0.12], rotY: -0.35 },
+  shield: { pos: [-0.54, 0.2, 0.05], rotY: 0.45 },
+  bow: { pos: [0.35, 0.78, 0.1], rotY: -0.2 },
 };
 
 /** Layout for first-person view (parented to camera). */
@@ -51,7 +51,7 @@ const SHIELD_BLOCK_POS_DELTA_FIRST: readonly [number, number, number] = [
   0.1, 0.22, -0.12,
 ];
 const SHIELD_BLOCK_POS_DELTA_THIRD: readonly [number, number, number] = [
-  0.08, 0.14, -0.1,
+  0.08, 0.14, -0.2,
 ];
 
 type ShieldBaseline = {

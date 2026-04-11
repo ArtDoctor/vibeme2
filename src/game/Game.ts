@@ -16,6 +16,7 @@ import {
 import { WorldArrows } from "./WorldArrows";
 import { WorldMobs } from "./WorldMobs";
 import { CompassHud } from "./CompassHud";
+import { PlayerChatHud } from "./PlayerChatHud";
 import { WorldPickups } from "./WorldPickups";
 import {
   nearestShopIndex,
@@ -47,6 +48,10 @@ export interface GameOptions {
   shopPanel?: HTMLElement;
   /** World position x, y, z (top-right). */
   coordsEl?: HTMLElement;
+  /** Proximity chat container (`#hud-chat`); multiplayer only. */
+  chatHud?: HTMLElement;
+  /** When true, chat hotkey is ignored (e.g. death screen). */
+  isChatBlocked?: () => boolean;
 }
 
 export class Game {
@@ -73,6 +78,7 @@ export class Game {
   private multiplayer: MultiplayerClient | null = null;
   private readonly shopPanel?: HTMLElement;
   private readonly coordsEl?: HTMLElement;
+  private readonly chatHud: PlayerChatHud | null;
   private shopOpen = false;
   private shopAtIndex: number | null = null;
   private readonly onDocKeydown = (e: KeyboardEvent): void => {
@@ -114,6 +120,10 @@ export class Game {
       hudHint: options.hudHint,
       safeZoneHint: options.safeZoneHint,
       creativeHint: options.creativeHint,
+      getPlayerTeam:
+        options.localPlayerId !== undefined
+          ? () => this.multiplayer?.team ?? null
+          : undefined,
     });
     this.controls.setSpawn(world.spawn);
 
@@ -162,6 +172,30 @@ export class Game {
 
     this.shopPanel = options.shopPanel;
     this.coordsEl = options.coordsEl;
+    if (
+      options.chatHud !== undefined &&
+      options.localPlayerId !== undefined &&
+      options.isChatBlocked !== undefined
+    ) {
+      this.chatHud = new PlayerChatHud({
+        root: options.chatHud,
+        isBlocked: options.isChatBlocked,
+        onComposeOpen: () => {
+          this.controls.setInputSuppressed(true);
+          this.combatInput?.setChatSuppressed(true);
+          void document.exitPointerLock();
+        },
+        onComposeClose: () => {
+          this.controls.setInputSuppressed(false);
+          this.combatInput?.setChatSuppressed(false);
+        },
+        onSend: (text: string) => {
+          this.multiplayer?.sendChat(text);
+        },
+      });
+    } else {
+      this.chatHud = null;
+    }
     if (this.coordsEl) {
       this.coordsEl.classList.remove("hidden");
     }
@@ -246,6 +280,7 @@ export class Game {
     this.worldPickups?.sync(msg.pickups ?? []);
     this.worldMobs?.sync(mobs, msg.damageFloats);
     this.lastMobs = mobs;
+    this.chatHud?.mergeFromSnapshot(msg.chat);
     this.updateCombatHud(players);
   }
 
@@ -452,6 +487,7 @@ export class Game {
         const fmt = (v: number): string => v.toFixed(1);
         coordsHud.textContent = `x ${fmt(eye.x)}, y ${fmt(eye.y)}, z ${fmt(eye.z)}`;
       }
+      this.chatHud?.update();
       this.compassHud?.update(
         horizontalYawFromCamera(this.camera),
         eye.x,
@@ -519,6 +555,7 @@ export class Game {
     this.worldPickups?.dispose();
     this.worldMobs?.dispose();
     this.compassHud?.dispose();
+    this.chatHud?.dispose();
     this.coordsEl?.classList.add("hidden");
     if (this.localThirdPersonRig) {
       this.scene.remove(this.localThirdPersonRig);

@@ -3,7 +3,9 @@ import { Camera, Vector3 } from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { horizontalYawFromCamera } from "../combat/constants";
 import { EYE_HEIGHT, PLAYER_RADIUS } from "../game/constants";
+import type { PlayerTeam } from "../net/types";
 import type { DesertWorld } from "../scene/DesertScene";
+import { extrudeFromEnemyWarCamps } from "../world/teamTerritory";
 import type { PlayerState } from "./PlayerState";
 import { iterativelyResolvePlayerXz } from "./circleAabbXZ";
 import {
@@ -55,6 +57,8 @@ export interface FirstPersonControlsOptions {
   safeZoneHint?: HTMLElement;
   /** Shown while creative mode is enabled (UI only). */
   creativeHint?: HTMLElement;
+  /** Multiplayer: push feet out of the enemy war-camp disk (matches server). */
+  getPlayerTeam?: () => PlayerTeam | null;
 }
 
 export class FirstPersonControls {
@@ -70,6 +74,7 @@ export class FirstPersonControls {
   private readonly hudHint?: HTMLElement;
   private readonly safeZoneHint?: HTMLElement;
   private readonly creativeHint?: HTMLElement;
+  private readonly getPlayerTeam?: () => PlayerTeam | null;
   private readonly move = new Vector3();
   private readonly velocity = new Vector3();
   /** Eye / capsule top — authoritative for physics and networking (not camera when in third person). */
@@ -88,6 +93,8 @@ export class FirstPersonControls {
   private keySprint = false;
   private jumpRequested = false;
   private movementMode = createMovementModeState();
+  /** When true (e.g. chat compose), movement and look are frozen; pointer lock is released externally. */
+  private inputSuppressed = false;
 
   constructor(options: FirstPersonControlsOptions) {
     this.camera = options.camera;
@@ -96,6 +103,7 @@ export class FirstPersonControls {
     this.hudHint = options.hudHint;
     this.safeZoneHint = options.safeZoneHint;
     this.creativeHint = options.creativeHint;
+    this.getPlayerTeam = options.getPlayerTeam;
 
     this.controls = new PointerLockControls(this.camera, this.domElement);
 
@@ -104,6 +112,26 @@ export class FirstPersonControls {
     document.addEventListener("keyup", this.onKeyUp);
     this.controls.addEventListener("lock", this.onLock);
     this.controls.addEventListener("unlock", this.onUnlock);
+  }
+
+  /**
+   * Disables WASD, mouse-look integration, and combat movement while chat or modal UI owns input.
+   * Clears held movement keys when enabling suppression.
+   */
+  setInputSuppressed(suppressed: boolean): void {
+    this.inputSuppressed = suppressed;
+    if (suppressed) {
+      this.keyForward = false;
+      this.keyBackward = false;
+      this.keyLeft = false;
+      this.keyRight = false;
+      this.keyAscend = false;
+      this.keyDescend = false;
+      this.keySprint = false;
+      this.jumpRequested = false;
+      this.velocity.set(0, 0, 0);
+      this.syncStateVelocity();
+    }
   }
 
   setSpawn(spawn: Vector3): void {
@@ -122,6 +150,12 @@ export class FirstPersonControls {
   }
 
   update(delta: number): void {
+    if (this.inputSuppressed) {
+      this.applyCameraView();
+      this.updateSafeZoneHint();
+      this.updateCreativeHint();
+      return;
+    }
     if (!this.controls.isLocked) {
       if (this.movementMode.creativeMode && this.movementMode.flyMode) {
         this.velocity.set(0, 0, 0);
@@ -166,6 +200,7 @@ export class FirstPersonControls {
     );
     this.eyePosition.x = resolved.x;
     this.eyePosition.z = resolved.z;
+    this.applyEnemyWarCampExtrusion();
 
     // ---- Integrate Y, then snap to ground ----
     this.eyePosition.y += this.velocity.y * delta;
@@ -313,9 +348,20 @@ export class FirstPersonControls {
     );
     this.eyePosition.x = resolved.x;
     this.eyePosition.z = resolved.z;
+    this.applyEnemyWarCampExtrusion();
 
     this.state.onGround = false;
     this.syncStateVelocity();
+  }
+
+  private applyEnemyWarCampExtrusion(): void {
+    const team = this.getPlayerTeam?.() ?? null;
+    if (team === null) {
+      return;
+    }
+    const o = extrudeFromEnemyWarCamps(team, this.eyePosition.x, this.eyePosition.z);
+    this.eyePosition.x = o.x;
+    this.eyePosition.z = o.z;
   }
 
   private applyGravityOnly(delta: number): void {
@@ -358,6 +404,7 @@ export class FirstPersonControls {
   // ---- DOM event handlers (arrow methods so they bind & dispose cleanly) --
 
   private readonly onCanvasClick = (): void => {
+    if (this.inputSuppressed) return;
     if (!this.controls.isLocked) {
       void this.controls.lock();
     }
@@ -372,6 +419,7 @@ export class FirstPersonControls {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (this.inputSuppressed) return;
     switch (e.code) {
       case "KeyW":
       case "ArrowUp":
@@ -443,6 +491,7 @@ export class FirstPersonControls {
   };
 
   private readonly onKeyUp = (e: KeyboardEvent): void => {
+    if (this.inputSuppressed) return;
     switch (e.code) {
       case "KeyW":
       case "ArrowUp":

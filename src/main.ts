@@ -4,6 +4,7 @@ import {
   MultiplayerClient,
   readStoredSession,
 } from "./net/multiplayer";
+import type { PlayerTeam } from "./net/types";
 
 const canvasEl = document.getElementById("game-canvas");
 if (!(canvasEl instanceof HTMLCanvasElement)) {
@@ -19,6 +20,7 @@ const hudCombat = document.getElementById("hud-combat") ?? undefined;
 const hudCompass = document.getElementById("hud-compass") ?? undefined;
 const hudCoords = document.getElementById("hud-coords") ?? undefined;
 const shopPanel = document.getElementById("shop-panel") ?? undefined;
+const hudChat = document.getElementById("hud-chat") ?? undefined;
 const joinPanel = document.getElementById("join-panel");
 const joinNickname = document.getElementById("join-nickname");
 const joinSubmit = document.getElementById("join-submit");
@@ -63,6 +65,17 @@ function showJoinPanel(): void {
   joinPanel?.classList.remove("hidden");
 }
 
+function getSelectedJoinTeam(): PlayerTeam {
+  const el = document.querySelector<HTMLInputElement>(
+    'input[name="join-team"]:checked',
+  );
+  const v = el?.value;
+  if (v === "red" || v === "blue" || v === "neutral") {
+    return v;
+  }
+  return "neutral";
+}
+
 function showDeathPanel(): void {
   if (deathPanel) {
     deathPanel.classList.remove("hidden");
@@ -105,7 +118,7 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
   try {
     disposeGame();
     const mp = await MultiplayerClient.connect(
-      { nickname, session: stored },
+      { nickname, session: stored, team: getSelectedJoinTeam() },
       (snap, localPlayerId) => {
         if (snap.deaths?.includes(localPlayerId)) {
           showDeathPanel();
@@ -123,6 +136,9 @@ async function startMultiplayer(options?: { freshSession?: boolean }): Promise<v
       compassEl: hudCompass,
       coordsEl: hudCoords,
       shopPanel,
+      chatHud: hudChat,
+      isChatBlocked: () =>
+        deathPanel !== null && !deathPanel.classList.contains("hidden"),
     });
     game.attachMultiplayer(mp);
     hideJoinPanel();
