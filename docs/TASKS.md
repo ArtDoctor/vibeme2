@@ -130,9 +130,6 @@ Mob AI is dumb on purpose at first: state machine of `idle / chase / attack / de
       same courtyard, **no player-vs-player damage** applies there until the
       courtyard is no longer mixed.
 - [x] **Flags**: client renders team-colored markers at red, blue, and neutral home courtyards.
-- [ ] No formal "party" system. Players can group up freely; cooperation is
-      emergent. Boss kill credit goes to everyone who dealt damage above a
-      threshold.
 - [x] Team color visible on the remote player model (tinted torso box).
 
 ## Milestone 6 — Multiplayer
@@ -233,7 +230,6 @@ runs; server is authoritative; client keeps only a session token in
       for `world` + `validate`.
 - [ ] Lint (eslint or biome). The strict tsconfig already catches a lot.
 - [x] CI workflow (`.github/workflows/ci.yml`): `npm run smoke:ci` + `cargo test`.
-- [ ] Bundle size budget in `vite.config.ts`.
 
 ## Out of scope (for now)
 
